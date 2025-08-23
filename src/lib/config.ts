@@ -10,8 +10,7 @@ export interface ExtensionConfig {
   IS_PRODUCTION: boolean;
 }
 
-// Environment detection
-const isDevelopment = process.env.NODE_ENV === 'development';
+// Environment detection - removed as not available in browser context
 
 // Default to production URLs - can be overridden in settings
 export const DEFAULT_CONFIG: ExtensionConfig = {

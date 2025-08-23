@@ -32,7 +32,7 @@ chrome.runtime.onInstalled.addListener(async () => {
 });
 
 // Listen for tab updates to detect Cogix website login
-chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+chrome.tabs.onUpdated.addListener(async (_tabId, changeInfo, tab) => {
   if (changeInfo.status === 'complete' && tab.url) {
     const url = new URL(tab.url);
     const config = configManager.current;
@@ -77,7 +77,7 @@ interface MessageResponse {
 }
 
 chrome.runtime.onMessage.addListener(
-  (request: MessageRequest, sender: chrome.runtime.MessageSender, sendResponse: (response: MessageResponse) => void) => {
+  (request: MessageRequest, _sender: chrome.runtime.MessageSender, sendResponse: (response: MessageResponse) => void) => {
     console.log('Background received message:', request.action);
 
     switch (request.action) {
@@ -201,7 +201,7 @@ chrome.action.onClicked.addListener(async (tab) => {
   }).catch(() => {
     // Content script might not be loaded, inject it
     chrome.scripting.executeScript({
-      target: { tabId: tab.id },
+      target: { tabId: tab.id! },
       files: ['content/content-script.js']
     }).then(() => {
       // Try again after injection

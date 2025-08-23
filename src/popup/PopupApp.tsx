@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Eye, LogIn, LogOut, Play, Square, Settings, Folder, User, CheckCircle, AlertCircle, ExternalLink, RefreshCw } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Eye, LogOut, Settings, Folder, User, CheckCircle, AlertCircle, ExternalLink, RefreshCw } from 'lucide-react';
 import { LoginForm } from '@components/LoginForm';
 import { ProjectSelector } from '@components/ProjectSelector';
 import { RecordingControls } from '@components/RecordingControls';
@@ -7,7 +7,7 @@ import { useAuth } from '@lib/hooks/useAuth';
 import { useRecording } from '@lib/hooks/useRecording';
 
 export function PopupApp() {
-  const { isAuthenticated, user, loading: authLoading, login, logout, checkAuthStatus } = useAuth();
+  const { isAuthenticated, user, loading: authLoading, logout, checkAuthStatus } = useAuth();
   const { isRecording, startRecording, stopRecording } = useRecording();
   const [currentView, setCurrentView] = useState<'login' | 'main' | 'projects'>('main');
   const [selectedProject, setSelectedProject] = useState<any>(null);

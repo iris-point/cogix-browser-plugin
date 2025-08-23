@@ -19,9 +19,9 @@ export class CogixAPIClient {
    */
   private async request(endpoint: string, options: RequestInit = {}): Promise<any> {
     const url = `${this.baseURL}${endpoint}`;
-    const headers: HeadersInit = {
+    const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-      ...options.headers
+      ...(options.headers as Record<string, string> || {})
     };
 
     // Get auth token from session manager
@@ -93,7 +93,7 @@ export class CogixAPIClient {
    * Upload eye tracking session - matches cogix-frontend implementation
    */
   async uploadSession(projectId: string, sessionData: any) {
-    const token = await this.sessionManager.getAuthToken();
+    await this.sessionManager.getAuthToken();
     
     // First, get a signed URL for the session file (same as cogix-frontend)
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');

@@ -384,7 +384,7 @@ export class CogixContentManager {
     await this.eyeTrackingManager.stopTracking();
 
     // Stop session recording
-    const session = await this.sessionManager.stopRecording();
+    await this.sessionManager.stopRecording();
 
     // Format session data to match TrackingSession format from cogix-eye-tracking
     const duration = Date.now() - this.recordingState.startTime!;

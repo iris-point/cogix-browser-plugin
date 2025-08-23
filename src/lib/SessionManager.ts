@@ -24,7 +24,7 @@ interface AuthCookies {
 export class SessionManager {
   private static instance: SessionManager;
   private session: Session | null = null;
-  private sessionCheckInterval: NodeJS.Timeout | null = null;
+  private sessionCheckInterval: ReturnType<typeof setInterval> | null = null;
   private FRONTEND_URL: string = 'https://app.cogix.app';
   private API_URL: string = 'https://api.cogix.app';
 

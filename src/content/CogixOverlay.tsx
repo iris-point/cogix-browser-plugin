@@ -2,10 +2,10 @@
  * Cogix Overlay Interface - Loom-style recording setup
  */
 
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { 
-  X, Eye, Monitor, Camera, Mic, MicOff, Settings, 
-  Play, Square, User, LogOut, Folder, CheckCircle,
+  X, Eye, Monitor, Camera, Mic, MicOff, 
+  Play, User, LogOut, Folder, CheckCircle,
   AlertCircle, ChevronDown, Target, Activity
 } from 'lucide-react';
 
@@ -26,7 +26,7 @@ export function CogixOverlay({ isAuthenticated, user, currentProjectId, onClose 
   const [projects, setProjects] = useState<any[]>([]);
   const [selectedProject, setSelectedProject] = useState<any>(null);
   const [showProjectDropdown, setShowProjectDropdown] = useState(false);
-  const [isRecording, setIsRecording] = useState(false);
+  const [, setIsRecording] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [isCalibrated, setIsCalibrated] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<'disconnected' | 'connecting' | 'connected'>('disconnected');

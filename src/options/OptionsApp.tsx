@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Eye, Settings, Save, RefreshCw, Monitor, Camera, Server } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Eye, Save, RefreshCw, Monitor, Camera, Server } from 'lucide-react';
 
 interface ExtensionSettings {
   defaultProvider: 'hh' | 'webgazer';

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Play, Square, Eye, Monitor, Target, Clock, Activity } from 'lucide-react';
 
 interface RecordingControlsProps {
@@ -8,13 +8,13 @@ interface RecordingControlsProps {
   onStop: () => void;
 }
 
-export function RecordingControls({ projectId, isRecording, onStart, onStop }: RecordingControlsProps) {
+export function RecordingControls({ isRecording, onStart, onStop }: RecordingControlsProps) {
   const [duration, setDuration] = useState(0);
   const [connectionStatus, setConnectionStatus] = useState<'disconnected' | 'connecting' | 'connected'>('disconnected');
   const [calibrated, setCalibrated] = useState(false);
 
   useEffect(() => {
-    let interval: NodeJS.Timeout;
+    let interval: ReturnType<typeof setInterval>;
     if (isRecording) {
       interval = setInterval(() => {
         setDuration(d => d + 1);
@@ -34,7 +34,7 @@ export function RecordingControls({ projectId, isRecording, onStart, onStop }: R
     try {
       const response = await chrome.tabs.query({ active: true, currentWindow: true });
       if (response[0]) {
-        chrome.tabs.sendMessage(response[0].id, { action: 'checkConnection' }, (response) => {
+        chrome.tabs.sendMessage(response[0].id!, { action: 'checkConnection' }, (response) => {
           if (response?.connected) {
             setConnectionStatus('connected');
             setCalibrated(response.calibrated || false);
@@ -49,7 +49,7 @@ export function RecordingControls({ projectId, isRecording, onStart, onStop }: R
   const handleCalibrate = async () => {
     const response = await chrome.tabs.query({ active: true, currentWindow: true });
     if (response[0]) {
-      chrome.tabs.sendMessage(response[0].id, { action: 'startCalibration' });
+      chrome.tabs.sendMessage(response[0].id!, { action: 'startCalibration' });
     }
   };
 

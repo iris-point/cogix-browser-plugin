@@ -9,7 +9,7 @@ import { CogixContentManager } from './CogixContentManager';
 const contentManager = new CogixContentManager();
 
 // Listen for messages from popup/background
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
   console.log('[Cogix Content] Received message:', request.action);
   
   switch (request.action) {

@@ -5,18 +5,20 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "prebuild": "node scripts/generate-icons.js",
+    "build": "node scripts/build.js",
+    "build:vite": "tsc && vite build",
     "preview": "vite preview",
-    "build:extension": "npm run build && npm run copy:manifest",
-    "copy:manifest": "copy public\\manifest.json dist\\",
-    "watch": "vite build --watch"
+    "generate:icons": "node scripts/generate-icons.js",
+    "watch": "vite build --watch",
+    "clean": "node -e \"require('fs').rmSync('dist', {recursive:true, force:true})\""
   },
   "dependencies": {
     "@iris-point/eye-tracking": "file:../cogix-eye-tracking",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
+    "clsx": "^2.0.0",
     "lucide-react": "^0.263.1",
-    "clsx": "^2.0.0"
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.251",
@@ -33,5 +35,8 @@
     "tailwindcss": "^3.3.0",
     "typescript": "^5.2.2",
     "vite": "^5.0.8"
+  },
+  "optionalDependencies": {
+    "canvas": "^2.11.2"
   }
 }
