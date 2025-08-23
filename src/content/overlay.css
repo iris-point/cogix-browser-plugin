@@ -1,0 +1,6 @@
+/* Cogix Eye Tracking Extension - Content Overlay Styles */
+
+/* Ensure our UI is always on top */
+#cogix-floating-ui {
+  z-index: 2147483647 !important; /* Maximum z-index */
+}

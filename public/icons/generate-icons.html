@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Generate Icons</title>
+</head>
+<body>
+    <h2>Cogix Extension Icons</h2>
+    <p>Save each canvas as PNG with the corresponding filename:</p>
+    
+    <div>
+        <h3>icon-16.png</h3>
+        <canvas id="icon16" width="16" height="16"></canvas>
+    </div>
+    
+    <div>
+        <h3>icon-32.png</h3>
+        <canvas id="icon32" width="32" height="32"></canvas>
+    </div>
+    
+    <div>
+        <h3>icon-48.png</h3>
+        <canvas id="icon48" width="48" height="48"></canvas>
+    </div>
+    
+    <div>
+        <h3>icon-128.png</h3>
+        <canvas id="icon128" width="128" height="128"></canvas>
+    </div>
+
+    <script>
+        function drawIcon(canvasId, size) {
+            const canvas = document.getElementById(canvasId);
+            const ctx = canvas.getContext('2d');
+            
+            // Background
+            ctx.fillStyle = '#3b82f6';
+            ctx.fillRect(0, 0, size, size);
+            
+            // Eye shape
+            ctx.strokeStyle = 'white';
+            ctx.lineWidth = size / 16;
+            ctx.beginPath();
+            
+            // Outer eye shape
+            const centerX = size / 2;
+            const centerY = size / 2;
+            const eyeWidth = size * 0.7;
+            const eyeHeight = size * 0.35;
+            
+            ctx.beginPath();
+            ctx.ellipse(centerX, centerY, eyeWidth/2, eyeHeight/2, 0, 0, Math.PI * 2);
+            ctx.stroke();
+            
+            // Pupil
+            ctx.beginPath();
+            ctx.fillStyle = 'white';
+            ctx.arc(centerX, centerY, size * 0.15, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Inner pupil
+            ctx.beginPath();
+            ctx.fillStyle = '#3b82f6';
+            ctx.arc(centerX, centerY, size * 0.08, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        
+        drawIcon('icon16', 16);
+        drawIcon('icon32', 32);
+        drawIcon('icon48', 48);
+        drawIcon('icon128', 128);
+        
+        // Auto-download function
+        document.querySelectorAll('canvas').forEach(canvas => {
+            canvas.style.border = '1px solid #ccc';
+            canvas.style.margin = '10px';
+            canvas.style.cursor = 'pointer';
+            
+            canvas.onclick = function() {
+                const link = document.createElement('a');
+                link.download = canvas.id + '.png';
+                link.href = canvas.toDataURL();
+                link.click();
+            };
+        });
+    </script>
+</body>
+</html>
