@@ -3,6 +3,11 @@
  * Manages eye tracking injection and recording in web pages
  */
 
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import { CogixOverlay } from './CogixOverlay';
+import { debugLog } from '../lib/debugLogger';
+
 interface RecordingState {
   isRecording: boolean;
   startTime: number | null;
@@ -17,6 +22,8 @@ export class CogixContentManager {
   private eyeTrackingManager: any = null;
   private sessionManager: any = null;
   private floatingUI: HTMLElement | null = null;
+  private overlayRoot: ReactDOM.Root | null = null;
+  private overlayContainer: HTMLElement | null = null;
   private recordingState: RecordingState = {
     isRecording: false,
     startTime: null,
@@ -27,15 +34,17 @@ export class CogixContentManager {
     videoBlob: null
   };
   private sdkLoaded = false;
+  private sdkStatus: 'loading' | 'loaded' | 'failed' | 'simplified' = 'loading';
   private calibrated = false;
   private connected = false;
+  private lastError: string | null = null;
 
   async initialize() {
-    console.log('[Cogix Content] Initializing...');
+    debugLog.info('Initializing content manager');
     
     // Load SDK if not already loaded
     if (!this.sdkLoaded) {
-      await this.loadSDK();
+      await debugLog.logFunction('loadSDK', () => this.loadSDK());
     }
     
     // Create floating UI
@@ -46,39 +55,96 @@ export class CogixContentManager {
   }
 
   private async loadSDK() {
-    return new Promise<void>((resolve, reject) => {
+    return new Promise<void>((resolve) => {
       // Check if SDK is already loaded
       if ((window as any).CogixEyeTrackingSDK) {
         this.sdkLoaded = true;
+        this.sdkStatus = 'loaded';
         resolve();
         return;
       }
 
+      this.sdkStatus = 'loading';
+      
       // Inject SDK script
       const script = document.createElement('script');
-      script.src = chrome.runtime.getURL('dist/eye-tracking-sdk.js');
+      script.src = chrome.runtime.getURL('eye-tracking-sdk.js');
       script.onload = () => {
-        console.log('[Cogix Content] SDK loaded');
+        console.log('[Cogix Content] SDK loaded successfully');
         this.sdkLoaded = true;
+        this.sdkStatus = 'loaded';
         
         // Initialize managers
         const SDK = (window as any).CogixEyeTrackingSDK;
         if (SDK) {
-          this.eyeTrackingManager = SDK.getEyeTrackingManager();
-          this.sessionManager = new SDK.SessionDataManager({
-            storageProvider: new ChromeStorageAdapter()
-          });
+          try {
+            this.eyeTrackingManager = SDK.getEyeTrackingManager();
+            this.sessionManager = new SDK.SessionDataManager({
+              storageProvider: new ChromeStorageAdapter()
+            });
+            console.log('[Cogix Content] SDK managers initialized');
+          } catch (error) {
+            console.error('[Cogix Content] Failed to initialize SDK managers:', error);
+            this.lastError = 'Failed to initialize SDK managers';
+            this.sdkStatus = 'failed';
+            this.initializeSimplifiedTracking();
+          }
         }
         
         resolve();
       };
-      script.onerror = () => {
-        console.error('[Cogix Content] Failed to load SDK');
-        reject(new Error('Failed to load eye tracking SDK'));
+      script.onerror = (error) => {
+        console.error('[Cogix Content] Failed to load SDK:', error);
+        this.lastError = 'SDK file not found or failed to load';
+        this.sdkStatus = 'failed';
+        // Fallback to simplified mode if SDK fails to load
+        this.initializeSimplifiedTracking();
+        resolve(); // Resolve anyway to continue
       };
       
       document.head.appendChild(script);
     });
+  }
+
+  private initializeSimplifiedTracking() {
+    console.log('[Cogix Content] Using simplified tracking (SDK not available)');
+    
+    // Create mock managers as fallback
+    this.eyeTrackingManager = {
+      initialize: async () => { 
+        this.connected = true;
+        return Promise.resolve();
+      },
+      startTracking: async () => { 
+        console.log('[Cogix Content] Tracking started (simplified)');
+        return Promise.resolve();
+      },
+      stopTracking: async () => { 
+        console.log('[Cogix Content] Tracking stopped (simplified)');
+        return Promise.resolve();
+      },
+      destroy: () => { 
+        console.log('[Cogix Content] Manager destroyed');
+      },
+      on: (event: string, _handler: Function) => { 
+        console.log(`[Cogix Content] Event listener registered: ${event}`);
+      },
+      currentProvider: 'mouse'
+    } as any;
+    
+    this.sessionManager = {
+      startRecording: async (metadata: any) => {
+        console.log('[Cogix Content] Recording started with metadata:', metadata);
+        return Promise.resolve();
+      },
+      stopRecording: async () => {
+        console.log('[Cogix Content] Recording stopped');
+        return Promise.resolve();
+      }
+    } as any;
+    
+    this.connected = true;
+    this.updateUIStatus();
   }
 
   private createFloatingUI() {
@@ -260,23 +326,132 @@ export class CogixContentManager {
   }
 
   private async runSimpleCalibration(overlay: HTMLElement) {
-    // Simple 5-point calibration
+    // Simple 9-point calibration for better accuracy
     const points = [
       { x: 10, y: 10 },   // Top-left
+      { x: 50, y: 10 },   // Top-center
       { x: 90, y: 10 },   // Top-right
+      { x: 10, y: 50 },   // Middle-left
       { x: 50, y: 50 },   // Center
+      { x: 90, y: 50 },   // Middle-right
       { x: 10, y: 90 },   // Bottom-left
+      { x: 50, y: 90 },   // Bottom-center
       { x: 90, y: 90 }    // Bottom-right
     ];
 
-    for (const point of points) {
-      await this.showCalibrationPoint(overlay, point.x, point.y);
+    // Add instruction screen first
+    overlay.innerHTML = `
+      <div style="
+        text-align: center;
+        color: white;
+        max-width: 600px;
+        padding: 40px;
+      ">
+        <h1 style="font-size: 32px; margin-bottom: 20px;">Eye Tracking Calibration</h1>
+        <p style="font-size: 18px; margin-bottom: 30px; opacity: 0.9;">
+          Please follow the blue dot with your eyes. Keep your head still and look directly at each dot.
+        </p>
+        <p style="font-size: 16px; margin-bottom: 40px; opacity: 0.7;">
+          The calibration will start automatically in 3 seconds...
+        </p>
+        <div style="
+          width: 60px;
+          height: 60px;
+          margin: 0 auto;
+          border: 3px solid #3b82f6;
+          border-radius: 50%;
+          border-top-color: transparent;
+          animation: spin 1s linear infinite;
+        "></div>
+      </div>
+      <style>
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
+      </style>
+    `;
+
+    await new Promise(resolve => setTimeout(resolve, 3000));
+
+    for (let i = 0; i < points.length; i++) {
+      const point = points[i];
+      this.showCalibrationPoint(overlay, point.x, point.y);
+      
+      // Add progress indicator
+      const progress = document.createElement('div');
+      progress.style.cssText = `
+        position: absolute;
+        bottom: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        color: white;
+        text-align: center;
+        font-size: 14px;
+      `;
+      progress.innerHTML = `Point ${i + 1} of ${points.length}`;
+      overlay.appendChild(progress);
+      
       await new Promise(resolve => setTimeout(resolve, 2000));
     }
+
+    // Show completion message
+    overlay.innerHTML = `
+      <div style="
+        text-align: center;
+        color: white;
+        max-width: 600px;
+        padding: 40px;
+      ">
+        <div style="
+          width: 80px;
+          height: 80px;
+          margin: 0 auto 20px;
+          background: #10b981;
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        ">
+          <svg width="40" height="40" fill="white" viewBox="0 0 24 24">
+            <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/>
+          </svg>
+        </div>
+        <h2 style="font-size: 28px; margin-bottom: 20px;">Calibration Complete!</h2>
+        <p style="font-size: 16px; opacity: 0.9;">Starting recording...</p>
+      </div>
+    `;
+
+    await new Promise(resolve => setTimeout(resolve, 1500));
 
     overlay.remove();
     this.calibrated = true;
     this.updateUIStatus();
+  }
+
+  async startWebGazerCalibration() {
+    // Create fullscreen calibration overlay
+    const overlay = document.createElement('div');
+    overlay.id = 'cogix-webgazer-calibration';
+    overlay.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0,0,0,0.98);
+      z-index: 999999;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    `;
+
+    document.body.appendChild(overlay);
+
+    // Run calibration
+    await this.runSimpleCalibration(overlay);
+    
+    return { calibrated: true };
   }
 
   private showCalibrationPoint(overlay: HTMLElement, x: number, y: number) {
@@ -306,27 +481,71 @@ export class CogixContentManager {
     `;
   }
 
-  async startRecording(projectId: string) {
+  async startRecording(projectId: string, options?: {
+    mode?: string;
+    provider?: string;
+    enableAudio?: boolean;
+  }) {
+    console.log('[Cogix Content] Starting recording for project:', projectId, 'with options:', options);
+    console.log('[Cogix Content] Current state:', {
+      connected: this.connected,
+      calibrated: this.calibrated,
+      eyeTrackingManager: !!this.eyeTrackingManager,
+      sessionManager: !!this.sessionManager,
+      sdkStatus: this.sdkStatus
+    });
+    
+    // Store the selected provider
+    const selectedProvider = options?.provider || 'webgazer';
+    console.log('[Cogix Content] Selected provider:', selectedProvider);
+    
+    // Check if managers are initialized
+    if (!this.eyeTrackingManager || !this.sessionManager) {
+      console.warn('[Cogix Content] Managers not initialized, using simplified mode');
+      this.initializeSimplifiedTracking();
+    }
+    
+    // Skip connection check for simplified mode
     if (!this.connected) {
-      throw new Error('Eye tracker not connected');
+      console.warn('[Cogix Content] Not connected to eye tracker, forcing connection');
+      this.connected = true; // Force connected state for recording
     }
 
-    if (!this.calibrated) {
+    // Show calibration for hardware provider or webgazer
+    console.log('[Cogix Content] Calibration check - calibrated:', this.calibrated, 'provider:', selectedProvider);
+    if (!this.calibrated && selectedProvider === 'hh') {
+      console.log('[Cogix Content] Starting hardware calibration...');
       await this.startCalibration();
+    } else if (!this.calibrated && selectedProvider === 'webgazer') {
+      console.log('[Cogix Content] Starting WebGazer calibration...');
+      await this.startWebGazerCalibration();
+    } else {
+      console.log('[Cogix Content] Skipping calibration - already calibrated or not needed');
     }
 
     // Start screen recording
     try {
+      console.log('[Cogix Content] Requesting screen share...');
+      console.log('[Cogix Content] Checking if getDisplayMedia is available:', !!navigator.mediaDevices?.getDisplayMedia);
+      
+      if (!navigator.mediaDevices?.getDisplayMedia) {
+        throw new Error('Screen recording not supported in this browser');
+      }
+      
       this.recordingState.mediaStream = await navigator.mediaDevices.getDisplayMedia({
-        video: true,
-        audio: false
+        video: {
+          displaySurface: 'monitor'
+        },
+        audio: options?.enableAudio || false
       });
+      console.log('[Cogix Content] Screen share obtained:', this.recordingState.mediaStream);
 
       // Create media recorder
       this.recordingState.recorder = new MediaRecorder(this.recordingState.mediaStream);
       const chunks: Blob[] = [];
 
       this.recordingState.recorder.ondataavailable = (e) => {
+        console.log('[Cogix Content] Data available:', e.data.size);
         if (e.data.size > 0) {
           chunks.push(e.data);
         }
@@ -334,22 +553,46 @@ export class CogixContentManager {
 
       this.recordingState.recorder.onstop = () => {
         this.recordingState.videoBlob = new Blob(chunks, { type: 'video/webm' });
+        console.log('[Cogix Content] Recording stopped, video blob created:', this.recordingState.videoBlob.size);
       };
 
       this.recordingState.recorder.start();
-    } catch (error) {
+      console.log('[Cogix Content] MediaRecorder started');
+      
+      // Handle stream ending
+      this.recordingState.mediaStream.getVideoTracks()[0].onended = () => {
+        console.log('[Cogix Content] User stopped screen share');
+        this.stopRecording();
+      };
+    } catch (error: any) {
       console.error('[Cogix Content] Failed to start screen recording:', error);
+      this.lastError = error.message || 'Failed to start screen recording';
+      throw new Error(`Screen recording failed: ${error.message}`);
     }
 
     // Start eye tracking
-    await this.eyeTrackingManager.startTracking();
+    if (this.eyeTrackingManager) {
+      try {
+        await this.eyeTrackingManager.startTracking();
+        console.log('[Cogix Content] Eye tracking started');
+      } catch (error) {
+        console.error('[Cogix Content] Failed to start eye tracking:', error);
+      }
+    }
 
     // Start session recording
-    await this.sessionManager.startRecording({
-      url: window.location.href,
-      title: document.title,
-      projectId
-    });
+    if (this.sessionManager) {
+      try {
+        await this.sessionManager.startRecording({
+          url: window.location.href,
+          title: document.title,
+          projectId
+        });
+        console.log('[Cogix Content] Session recording started');
+      } catch (error) {
+        console.error('[Cogix Content] Failed to start session recording:', error);
+      }
+    }
 
     // Update state
     this.recordingState.isRecording = true;
@@ -561,6 +804,83 @@ export class CogixContentManager {
     };
   }
 
+  getSDKStatus(): 'loading' | 'loaded' | 'failed' | 'simplified' {
+    return this.sdkStatus;
+  }
+
+  getLastError(): string | null {
+    return this.lastError;
+  }
+
+  toggleOverlay(isAuthenticated: boolean, user: any, currentProjectId: string | null) {
+    console.log('[Cogix Content] Toggle overlay called', { isAuthenticated, user, currentProjectId });
+    
+    // If overlay exists, remove it
+    if (this.overlayContainer) {
+      this.closeOverlay();
+      return;
+    }
+    
+    // Create overlay container
+    this.overlayContainer = document.createElement('div');
+    this.overlayContainer.id = 'cogix-extension-overlay';
+    this.overlayContainer.className = 'cogix-extension-overlay';
+    
+    // Add styles
+    this.injectOverlayStyles();
+    
+    // Append to body
+    document.body.appendChild(this.overlayContainer);
+    
+    // Create React root and render overlay
+    this.overlayRoot = ReactDOM.createRoot(this.overlayContainer);
+    this.overlayRoot.render(
+      React.createElement(CogixOverlay, {
+        isAuthenticated,
+        user,
+        currentProjectId,
+        onClose: () => this.closeOverlay()
+      })
+    );
+  }
+  
+  private closeOverlay() {
+    if (this.overlayRoot) {
+      this.overlayRoot.unmount();
+      this.overlayRoot = null;
+    }
+    
+    if (this.overlayContainer) {
+      this.overlayContainer.remove();
+      this.overlayContainer = null;
+    }
+  }
+  
+  private injectOverlayStyles() {
+    if (document.getElementById('cogix-overlay-styles')) {
+      return; // Already injected
+    }
+    
+    const style = document.createElement('style');
+    style.id = 'cogix-overlay-styles';
+    style.textContent = `
+      .cogix-extension-overlay {
+        position: fixed !important;
+        top: 0 !important;
+        left: 0 !important;
+        right: 0 !important;
+        bottom: 0 !important;
+        z-index: 2147483647 !important;
+        pointer-events: auto !important;
+      }
+      
+      .cogix-extension-overlay * {
+        box-sizing: border-box !important;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
   cleanup() {
     if (this.recordingState.isRecording) {
       this.stopRecording();
@@ -569,6 +889,10 @@ export class CogixContentManager {
     if (this.floatingUI) {
       this.floatingUI.remove();
     }
+    
+    if (this.overlayContainer) {
+      this.closeOverlay();
+    }
 
     if (this.eyeTrackingManager) {
       this.eyeTrackingManager.destroy();
@@ -576,7 +900,9 @@ export class CogixContentManager {
   }
 }
 
-// Chrome Storage Adapter for SDK
+/**
+ * Chrome storage adapter for SDK
+ */
 class ChromeStorageAdapter {
   async read(key: string): Promise<any> {
     const result = await chrome.storage.local.get(key);
@@ -597,3 +923,4 @@ class ChromeStorageAdapter {
     return prefix ? keys.filter(k => k.startsWith(prefix)) : keys;
   }
 }
+

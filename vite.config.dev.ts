@@ -2,6 +2,7 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { resolve } from 'path';
 
+// Development config
 export default defineConfig({
   plugins: [react()],
   build: {
@@ -10,7 +11,7 @@ export default defineConfig({
         popup: resolve(__dirname, 'src/popup/index.html'),
         options: resolve(__dirname, 'src/options/index.html'),
         background: resolve(__dirname, 'src/background/service-worker.ts'),
-        content: resolve(__dirname, 'src/content/content-script.ts'),
+        content: resolve(__dirname, 'src/content/content-bundled.ts')
       },
       output: {
         entryFileNames: (chunkInfo) => {
@@ -22,13 +23,19 @@ export default defineConfig({
           }
           return '[name]/[name].js';
         },
-        chunkFileNames: 'shared/[name].[hash].js',
+        chunkFileNames: 'shared/[name].js',
         assetFileNames: 'assets/[name].[ext]'
       }
     },
-    outDir: 'dist',
+    outDir: 'dist-dev',
     emptyOutDir: true,
-    sourcemap: false,
+    sourcemap: 'inline',
+    minify: false,
+    target: 'chrome90',
+    watch: {
+      include: 'src/**',
+      exclude: 'node_modules/**'
+    }
   },
   resolve: {
     alias: {
@@ -36,5 +43,8 @@ export default defineConfig({
       '@components': resolve(__dirname, 'src/components'),
       '@lib': resolve(__dirname, 'src/lib'),
     }
+  },
+  define: {
+    'process.env.NODE_ENV': '"development"'
   }
 });

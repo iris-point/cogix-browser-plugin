@@ -27,8 +27,12 @@ export function ProjectSelector({ onSelect, onBack }: ProjectSelectorProps) {
   const loadProjects = async () => {
     try {
       const response = await chrome.runtime.sendMessage({ action: 'getProjects' });
-      if (response.success) {
-        setProjects(response.data);
+      if (response.success && response.data) {
+        // Handle both array and object with projects field
+        const projectsList = Array.isArray(response.data) 
+          ? response.data 
+          : (response.data.projects || response.data.items || []);
+        setProjects(projectsList);
       }
     } catch (error) {
       console.error('Failed to load projects:', error);

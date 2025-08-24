@@ -4,14 +4,19 @@
   "description": "Cogix Eye Tracking Browser Extension",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "npm run dev:build",
+    "dev:auto": "npm run dev:watch",
+    "dev:build": "npm run generate:icons && npm run dev:copy-manifest && vite build --config vite.config.dev.ts",
+    "dev:watch": "vite build --config vite.config.dev.ts --watch",
+    "dev:copy-manifest": "node scripts/copy-dev-manifest.js",
     "prebuild": "node scripts/generate-icons.js",
     "build": "node scripts/build.js",
     "build:vite": "tsc && vite build",
     "preview": "vite preview",
     "generate:icons": "node scripts/generate-icons.js",
     "watch": "vite build --watch",
-    "clean": "node -e \"require('fs').rmSync('dist', {recursive:true, force:true})\""
+    "clean": "node -e \"require('fs').rmSync('dist', {recursive:true, force:true})\"",
+    "clean:dev": "node -e \"require('fs').rmSync('dist-dev', {recursive:true, force:true})\""
   },
   "dependencies": {
     "@iris-point/eye-tracking": "file:../cogix-eye-tracking",

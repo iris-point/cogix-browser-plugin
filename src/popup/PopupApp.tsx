@@ -35,7 +35,7 @@ export function PopupApp() {
   }, [authLoading]);
 
   const handleOpenWebsite = () => {
-    chrome.tabs.create({ url: 'http://localhost:3000/sign-in?from=extension' });
+    chrome.tabs.create({ url: 'https://www.cogix.app/sign-in?extension=true' });
   };
 
   const handleRefreshSession = async () => {
@@ -124,7 +124,7 @@ export function PopupApp() {
                 </div>
                 {sessionSource === 'website' && (
                   <button
-                    onClick={() => chrome.tabs.create({ url: 'http://localhost:3000/dashboard' })}
+                    onClick={() => chrome.tabs.create({ url: 'https://www.cogix.app/dashboard' })}
                     className="text-xs text-blue-600 hover:text-blue-700"
                   >
                     Open Dashboard

@@ -110,6 +110,30 @@ function buildApp() {
 }
 
 /**
+ * Fix content script imports
+ */
+function fixContentScript() {
+  console.log('🔧 Fixing extension scripts...');
+  try {
+    // First try the new wrapper script
+    execSync('node scripts/wrap-content-script.js', {
+      cwd: rootDir,
+      stdio: 'inherit'
+    });
+  } catch (error) {
+    console.warn('⚠️  Could not wrap content script, trying fix-imports:', error.message);
+    try {
+      execSync('node scripts/fix-imports.js', {
+        cwd: rootDir,
+        stdio: 'inherit'
+      });
+    } catch (error2) {
+      console.warn('⚠️  Could not fix scripts:', error2.message);
+    }
+  }
+}
+
+/**
  * Copy assets to dist
  */
 function copyAssets() {
@@ -120,6 +144,18 @@ function copyAssets() {
   const manifestDest = path.join(distDir, 'manifest.json');
   if (fs.existsSync(manifestSrc)) {
     copyFile(manifestSrc, manifestDest);
+  }
+  
+  // Copy eye tracking SDK
+  console.log('📦 Copying Eye Tracking SDK...');
+  const sdkSrc = path.join(__dirname, '../../cogix-eye-tracking/dist/index.umd.js');
+  const sdkDest = path.join(distDir, 'eye-tracking-sdk.js');
+  if (fs.existsSync(sdkSrc)) {
+    copyFile(sdkSrc, sdkDest);
+    console.log('✅ Copied eye-tracking-sdk.js');
+  } else {
+    console.warn('⚠️  Eye tracking SDK not found at:', sdkSrc);
+    console.warn('⚠️  Build cogix-eye-tracking first with: cd ../cogix-eye-tracking && npm run build');
   }
   
   // Copy icons
@@ -189,10 +225,13 @@ async function build() {
     // Step 3: Build app
     buildApp();
     
-    // Step 4: Copy assets
+    // Step 4: Fix content script
+    fixContentScript();
+    
+    // Step 5: Copy assets
     copyAssets();
     
-    // Step 5: Verify
+    // Step 6: Verify
     verifyBuild();
     
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);

@@ -14,9 +14,20 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
   
   switch (request.action) {
     case 'startRecording':
-      contentManager.startRecording(request.projectId)
-        .then(result => sendResponse({ success: true, data: result }))
-        .catch(error => sendResponse({ success: false, error: error.message }));
+      console.log('[Cogix Content] Processing startRecording with:', request);
+      contentManager.startRecording(request.projectId, {
+        mode: request.mode,
+        provider: request.provider,
+        enableAudio: request.enableAudio
+      })
+        .then(result => {
+          console.log('[Cogix Content] Recording started successfully:', result);
+          sendResponse({ success: true, data: result });
+        })
+        .catch(error => {
+          console.error('[Cogix Content] Failed to start recording:', error);
+          sendResponse({ success: false, error: error.message });
+        });
       return true;
 
     case 'stopRecording':
@@ -41,6 +52,24 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
       sendResponse({ 
         success: true, 
         data: contentManager.getStatus() 
+      });
+      break;
+
+    case 'toggleOverlay':
+      console.log('[Cogix Content] Toggling overlay', request);
+      contentManager.toggleOverlay(
+        request.isAuthenticated,
+        request.user,
+        request.currentProjectId
+      );
+      sendResponse({ success: true });
+      break;
+
+    case 'getSDKStatus':
+      sendResponse({ 
+        success: true, 
+        status: contentManager.getSDKStatus(),
+        error: contentManager.getLastError()
       });
       break;
 

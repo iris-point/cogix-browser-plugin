@@ -202,10 +202,24 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       // Inject recording UI into current tab
       chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
         if (tabs[0]) {
+          // Check if the URL is accessible (not chrome://, chrome-extension://, etc.)
+          const url = tabs[0].url;
+          if (!url || url.startsWith('chrome://') || url.startsWith('chrome-extension://') || url.startsWith('edge://')) {
+            sendResponse({ success: false, error: 'Cannot record on browser internal pages' });
+            return;
+          }
           chrome.tabs.sendMessage(tabs[0].id, { 
             action: 'startRecording',
             projectId: authState.currentProjectId 
-          }, sendResponse);
+          }, (response) => {
+            if (chrome.runtime.lastError) {
+              sendResponse({ success: false, error: chrome.runtime.lastError.message });
+            } else {
+              sendResponse(response);
+            }
+          });
+        } else {
+          sendResponse({ success: false, error: 'No active tab' });
         }
       });
       return true;
@@ -213,7 +227,21 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     case 'stopRecording':
       chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
         if (tabs[0]) {
-          chrome.tabs.sendMessage(tabs[0].id, { action: 'stopRecording' }, sendResponse);
+          // Check if the URL is accessible
+          const url = tabs[0].url;
+          if (!url || url.startsWith('chrome://') || url.startsWith('chrome-extension://') || url.startsWith('edge://')) {
+            sendResponse({ success: false, error: 'Cannot access browser internal pages' });
+            return;
+          }
+          chrome.tabs.sendMessage(tabs[0].id, { action: 'stopRecording' }, (response) => {
+            if (chrome.runtime.lastError) {
+              sendResponse({ success: false, error: chrome.runtime.lastError.message });
+            } else {
+              sendResponse(response);
+            }
+          });
+        } else {
+          sendResponse({ success: false, error: 'No active tab' });
         }
       });
       return true;
@@ -221,7 +249,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     case 'getRecordingStatus':
       chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
         if (tabs[0]) {
-          chrome.tabs.sendMessage(tabs[0].id, { action: 'getStatus' }, sendResponse);
+          // Check if the URL is accessible
+          const url = tabs[0].url;
+          if (!url || url.startsWith('chrome://') || url.startsWith('chrome-extension://') || url.startsWith('edge://')) {
+            sendResponse({ success: false, error: 'Cannot access browser internal pages', isRecording: false });
+            return;
+          }
+          chrome.tabs.sendMessage(tabs[0].id, { action: 'getStatus' }, (response) => {
+            if (chrome.runtime.lastError) {
+              sendResponse({ success: false, error: chrome.runtime.lastError.message, isRecording: false });
+            } else {
+              sendResponse(response);
+            }
+          });
         } else {
           sendResponse({ success: false, error: 'No active tab' });
         }

@@ -16,7 +16,7 @@ export interface ExtensionConfig {
 export const DEFAULT_CONFIG: ExtensionConfig = {
   API_URL: 'https://api.cogix.app',           // Production backend
   DATA_API_URL: 'https://data.cogix.app',     // Production data API
-  FRONTEND_URL: 'https://app.cogix.app',      // Production frontend
+  FRONTEND_URL: 'https://www.cogix.app',      // Production frontend
   IS_PRODUCTION: true
 };
 

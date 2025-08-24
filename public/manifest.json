@@ -31,7 +31,6 @@
     {
       "matches": ["<all_urls>"],
       "js": ["content/content-script.js"],
-      "css": ["content/overlay.css"],
       "run_at": "document_idle"
     }
   ],
@@ -46,7 +45,7 @@
     "default_title": "Click to start eye tracking recording"
   },
   
-  "options_page": "options/index.html",
+  "options_page": "src/options/index.html",
   
   "icons": {
     "16": "icons/icon-16.png",

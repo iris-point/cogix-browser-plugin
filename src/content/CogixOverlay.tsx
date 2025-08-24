@@ -6,8 +6,9 @@ import { useState, useEffect } from 'react';
 import { 
   X, Eye, Monitor, Camera, Mic, MicOff, 
   Play, User, LogOut, Folder, CheckCircle,
-  AlertCircle, ChevronDown, Target, Activity
+  AlertCircle, ChevronDown, Target, Activity, Bug
 } from 'lucide-react';
+import { CogixDebugPanel } from './CogixDebugPanel';
 
 interface CogixOverlayProps {
   isAuthenticated: boolean;
@@ -30,11 +31,15 @@ export function CogixOverlay({ isAuthenticated, user, currentProjectId, onClose 
   const [isConnecting, setIsConnecting] = useState(false);
   const [isCalibrated, setIsCalibrated] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<'disconnected' | 'connecting' | 'connected'>('disconnected');
+  const [sdkStatus, setSdkStatus] = useState<'loading' | 'loaded' | 'failed' | 'simplified'>('loading');
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [showDebugPanel, setShowDebugPanel] = useState(false);
 
   useEffect(() => {
     if (isAuthenticated) {
       loadProjects();
       checkConnection();
+      checkSDKStatus();
     }
   }, [isAuthenticated]);
 
@@ -49,16 +54,45 @@ export function CogixOverlay({ isAuthenticated, user, currentProjectId, onClose 
 
   const loadProjects = async () => {
     const response = await chrome.runtime.sendMessage({ action: 'getProjects' });
-    if (response.success) {
-      setProjects(response.data);
+    if (response.success && response.data) {
+      // Handle both array and object with projects field
+      const projectsList = Array.isArray(response.data) 
+        ? response.data 
+        : (response.data.projects || response.data.items || []);
+      setProjects(projectsList);
     }
   };
 
   const checkConnection = async () => {
-    const response = await chrome.runtime.sendMessage({ action: 'checkConnection' });
-    if (response?.connected) {
-      setConnectionStatus('connected');
-      setIsCalibrated(response.calibrated || false);
+    try {
+      const response = await chrome.runtime.sendMessage({ action: 'checkConnection' });
+      if (response?.success === false) {
+        setErrorMessage(response.error || 'Failed to check connection');
+        setConnectionStatus('disconnected');
+      } else if (response?.connected) {
+        setConnectionStatus('connected');
+        setIsCalibrated(response.calibrated || false);
+        setErrorMessage(null);
+      }
+    } catch (error) {
+      console.error('Failed to check connection:', error);
+      setConnectionStatus('disconnected');
+      setErrorMessage('Failed to communicate with extension');
+    }
+  };
+
+  const checkSDKStatus = async () => {
+    try {
+      const response = await chrome.runtime.sendMessage({ action: 'getSDKStatus' });
+      if (response?.success) {
+        setSdkStatus(response.status || 'loading');
+        if (response.status === 'failed') {
+          setErrorMessage('Eye tracking SDK failed to load. Using simplified mode.');
+        }
+      }
+    } catch (error) {
+      console.error('Failed to check SDK status:', error);
+      setSdkStatus('failed');
     }
   };
 
@@ -73,30 +107,42 @@ export function CogixOverlay({ isAuthenticated, user, currentProjectId, onClose 
 
   const handleStartRecording = async () => {
     if (!selectedProject) {
-      alert('Please select a project first');
+      setErrorMessage('Please select a project first');
       return;
     }
 
-    if (!isCalibrated && provider === 'hh') {
-      // Start calibration first
+    if (!isCalibrated && provider === 'hh' && sdkStatus === 'loaded') {
+      // Start calibration first for hardware provider
       await handleCalibrate();
     }
 
     setIsRecording(true);
+    setErrorMessage(null);
     
-    // Send start recording message
-    await chrome.runtime.sendMessage({
-      action: 'startRecording',
-      projectId: selectedProject.id,
-      mode: recordingMode,
-      provider,
-      enableAudio
-    });
+    try {
+      // Send start recording message
+      const response = await chrome.runtime.sendMessage({
+        action: 'startRecording',
+        projectId: selectedProject.id,
+        mode: recordingMode,
+        provider,
+        enableAudio
+      });
 
-    // Close overlay after starting
-    setTimeout(() => {
-      onClose();
-    }, 500);
+      if (response?.success) {
+        // Close overlay after starting
+        setTimeout(() => {
+          onClose();
+        }, 500);
+      } else {
+        setIsRecording(false);
+        setErrorMessage(response?.error || 'Failed to start recording');
+      }
+    } catch (error) {
+      console.error('Failed to start recording:', error);
+      setIsRecording(false);
+      setErrorMessage('Failed to start recording. Please try again.');
+    }
   };
 
   const handleCalibrate = async () => {
@@ -121,6 +167,12 @@ export function CogixOverlay({ isAuthenticated, user, currentProjectId, onClose 
       {/* Semi-transparent backdrop */}
       <div className="cogix-backdrop" onClick={onClose} />
       
+      {/* Debug Panel */}
+      <CogixDebugPanel 
+        isVisible={showDebugPanel} 
+        onToggle={() => setShowDebugPanel(!showDebugPanel)} 
+      />
+      
       {/* Main overlay panel */}
       <div className="cogix-panel">
         {/* Header */}
@@ -129,9 +181,28 @@ export function CogixOverlay({ isAuthenticated, user, currentProjectId, onClose 
             <Eye className="w-6 h-6" />
             <span>Cogix Eye Tracking</span>
           </div>
-          <button className="cogix-close-btn" onClick={onClose}>
-            <X className="w-5 h-5" />
-          </button>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button 
+              className="cogix-debug-btn" 
+              onClick={() => setShowDebugPanel(!showDebugPanel)}
+              style={{
+                background: 'transparent',
+                border: '1px solid rgba(255,255,255,0.2)',
+                borderRadius: '6px',
+                padding: '6px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                color: '#9ca3af'
+              }}
+              title="Toggle Debug Panel"
+            >
+              <Bug className="w-4 h-4" />
+            </button>
+            <button className="cogix-close-btn" onClick={onClose}>
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {!isAuthenticated ? (
@@ -254,7 +325,23 @@ export function CogixOverlay({ isAuthenticated, user, currentProjectId, onClose 
                 <div className={`cogix-status-dot ${isCalibrated ? 'connected' : 'disconnected'}`} />
                 <span>Calibration</span>
               </div>
+              <div className="cogix-status-card">
+                <div className={`cogix-status-dot ${
+                  sdkStatus === 'loaded' ? 'connected' : 
+                  sdkStatus === 'simplified' ? 'warning' : 
+                  sdkStatus === 'failed' ? 'error' : 'disconnected'
+                }`} />
+                <span>SDK {sdkStatus === 'simplified' ? '(Basic)' : ''}</span>
+              </div>
             </div>
+
+            {/* Error message display */}
+            {errorMessage && (
+              <div className="cogix-error-message">
+                <AlertCircle className="w-4 h-4" />
+                <span>{errorMessage}</span>
+              </div>
+            )}
 
             {/* Audio toggle */}
             <div className="cogix-section">

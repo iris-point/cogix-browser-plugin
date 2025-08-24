@@ -10,24 +10,22 @@ export default defineConfig({
         popup: resolve(__dirname, 'src/popup/index.html'),
         options: resolve(__dirname, 'src/options/index.html'),
         background: resolve(__dirname, 'src/background/service-worker.ts'),
-        content: resolve(__dirname, 'src/content/content-script.ts'),
       },
       output: {
         entryFileNames: (chunkInfo) => {
           if (chunkInfo.name === 'background') {
             return 'background/service-worker.js';
           }
-          if (chunkInfo.name === 'content') {
-            return 'content/content-script.js';
-          }
           return '[name]/[name].js';
         },
         chunkFileNames: 'shared/[name].[hash].js',
-        assetFileNames: 'assets/[name].[ext]'
+        assetFileNames: 'assets/[name].[ext]',
+        // Ensure everything is bundled properly
+        format: 'es'
       }
     },
     outDir: 'dist',
-    emptyOutDir: true,
+    emptyOutDir: false, // Don't empty since we build content separately
     sourcemap: false,
   },
   resolve: {
