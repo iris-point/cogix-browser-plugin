@@ -1,2 +1,0 @@
-# cogix-browser-plugin
-
