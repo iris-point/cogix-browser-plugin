@@ -1,47 +1,48 @@
 {
   "name": "cogix-browser-plugin",
+  "displayName": "Cogix Eye Tracking",
   "version": "1.0.0",
-  "description": "Cogix Eye Tracking Browser Extension",
-  "type": "module",
+  "description": "Eye tracking, screen recording, and event capture for research",
+  "author": "Cogix",
   "scripts": {
-    "dev": "npm run dev:build",
-    "dev:auto": "npm run dev:watch",
-    "dev:build": "npm run generate:icons && npm run dev:copy-manifest && vite build --config vite.config.dev.ts",
-    "dev:watch": "vite build --config vite.config.dev.ts --watch",
-    "dev:copy-manifest": "node scripts/copy-dev-manifest.js",
-    "prebuild": "node scripts/generate-icons.js",
-    "build": "node scripts/build.js",
-    "build:vite": "tsc && vite build",
-    "preview": "vite preview",
-    "generate:icons": "node scripts/generate-icons.js",
-    "watch": "vite build --watch",
-    "clean": "node -e \"require('fs').rmSync('dist', {recursive:true, force:true})\"",
-    "clean:dev": "node -e \"require('fs').rmSync('dist-dev', {recursive:true, force:true})\""
+    "dev": "plasmo dev",
+    "build": "plasmo build",
+    "package": "plasmo package"
   },
   "dependencies": {
-    "@iris-point/eye-tracking": "file:../cogix-eye-tracking",
-    "clsx": "^2.0.0",
-    "lucide-react": "^0.263.1",
+    "@clerk/chrome-extension": "^2.5.31",
+    "@iris-point/eye-tracking-core": "file:../..",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "react-router-dom": "^7.8.2"
   },
   "devDependencies": {
+    "@plasmohq/storage": "^1.13.0",
     "@types/chrome": "^0.0.251",
+    "@types/node": "20.11.5",
     "@types/react": "^18.2.43",
     "@types/react-dom": "^18.2.17",
-    "@typescript-eslint/eslint-plugin": "^6.14.0",
-    "@typescript-eslint/parser": "^6.14.0",
-    "@vitejs/plugin-react": "^4.2.1",
     "autoprefixer": "^10.4.16",
-    "eslint": "^8.55.0",
-    "eslint-plugin-react-hooks": "^4.6.0",
-    "eslint-plugin-react-refresh": "^0.4.5",
+    "plasmo": "^0.90.5",
     "postcss": "^8.4.32",
     "tailwindcss": "^3.3.0",
-    "typescript": "^5.2.2",
-    "vite": "^5.0.8"
+    "typescript": "^5.2.2"
   },
-  "optionalDependencies": {
-    "canvas": "^2.11.2"
+  "manifest": {
+    "key": "$CRX_PUBLIC_KEY",
+    "permissions": [
+      "cookies",
+      "storage",
+      "tabs",
+      "activeTab",
+      "scripting",
+      "desktopCapture"
+    ],
+    "host_permissions": [
+      "$PLASMO_PUBLIC_CLERK_SYNC_HOST/*",
+      "$CLERK_FRONTEND_API/*",
+      "https://cogix-data-io.workers.dev/*",
+      "https://data-io.cogix.app/*"
+    ]
   }
 }
