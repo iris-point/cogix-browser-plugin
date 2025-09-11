@@ -2,7 +2,7 @@
  * Debug utilities for Chrome Extension
  */
 
-export const DEBUG = process.env.NODE_ENV !== 'production'; // Auto-disable in production
+export const DEBUG = true; // Temporarily force debug mode on
 
 export function debugLog(category: string, message: string, data?: any) {
   if (!DEBUG) return;

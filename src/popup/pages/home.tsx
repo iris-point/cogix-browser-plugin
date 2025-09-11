@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react'
 import { useUser } from '@clerk/chrome-extension'
 import { Storage } from '@plasmohq/storage'
+import { ProjectSelector } from '../components/ProjectSelector'
+import type { Project } from '../../lib/api-client'
 
 const storage = new Storage()
 
@@ -8,6 +10,7 @@ export const HomePage = () => {
   const { user, isLoaded } = useUser()
   const [isRecording, setIsRecording] = useState(false)
   const [recordingTime, setRecordingTime] = useState(0)
+  const [selectedProject, setSelectedProject] = useState<Project | null>(null)
 
   useEffect(() => {
     // Load settings from storage
@@ -37,19 +40,26 @@ export const HomePage = () => {
   }
 
   const toggleRecording = async () => {
+    // Check if project is selected
+    if (!selectedProject && !isRecording) {
+      alert('Please select a project before recording')
+      return
+    }
+    
     const newState = !isRecording
     setIsRecording(newState)
     await storage.set('isRecording', newState)
     
-    // Send message to content script
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      if (tabs[0]?.id) {
-        chrome.tabs.sendMessage(tabs[0].id, {
-          type: 'TOGGLE_RECORDING',
-          isRecording: newState
-        })
-      }
+    // Send message to background script to start/stop recording
+    chrome.runtime.sendMessage({
+      type: 'TOGGLE_RECORDING',
+      isRecording: newState,
+      projectId: selectedProject?.id
     })
+  }
+  
+  const handleProjectSelected = (project: Project) => {
+    setSelectedProject(project)
   }
 
   if (!isLoaded) {
@@ -83,18 +93,24 @@ export const HomePage = () => {
       {/* Main Content Area */}
       <div className="plasmo-flex-1 plasmo-p-6">
         {/* User Welcome */}
-        <div className="plasmo-mb-6">
+        <div className="plasmo-mb-4">
           <div className="plasmo-flex plasmo-items-center plasmo-gap-3 plasmo-mb-4">
-            <div className="plasmo-w-10 plasmo-h-10 plasmo-bg-gradient-to-br plasmo-from-indigo-400 plasmo-to-purple-500 plasmo-rounded-full plasmo-flex plasmo-items-center plasmo-justify-center plasmo-text-white plasmo-font-semibold">
+            <div className="plasmo-w-10 plasmo-h-10 plasmo-bg-gradient-to-br plasmo-from-[var(--primary)] plasmo-to-[var(--secondary)] plasmo-rounded-full plasmo-flex plasmo-items-center plasmo-justify-center plasmo-text-white plasmo-font-semibold">
               {user.firstName?.[0] || user.emailAddresses[0].emailAddress[0].toUpperCase()}
             </div>
             <div>
-              <h2 className="plasmo-text-lg plasmo-font-semibold plasmo-text-gray-900">
+              <h2 className="plasmo-text-lg plasmo-font-semibold plasmo-text-[var(--foreground)]">
                 {user.firstName || user.emailAddresses[0].emailAddress.split('@')[0]}
               </h2>
-              <p className="plasmo-text-xs plasmo-text-gray-500">Ready to record</p>
+              <p className="plasmo-text-xs plasmo-text-[var(--muted)]">Ready to record</p>
             </div>
           </div>
+        </div>
+        
+        {/* Project Selector */}
+        <div className="plasmo-mb-4">
+          <h3 className="plasmo-text-sm plasmo-font-medium plasmo-text-[var(--foreground)] plasmo-mb-2">Project</h3>
+          <ProjectSelector onProjectSelected={handleProjectSelected} />
         </div>
 
         {/* Recording Status Card */}

@@ -43,6 +43,8 @@
     "host_permissions": [
       "$PLASMO_PUBLIC_CLERK_SYNC_HOST/*",
       "$CLERK_FRONTEND_API/*",
+      "$PLASMO_PUBLIC_API_URL/*",
+      "https://api.cogix.app/*",
       "https://cogix-data-io.workers.dev/*",
       "https://data-io.cogix.app/*"
     ]

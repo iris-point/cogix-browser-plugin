@@ -13,6 +13,9 @@ chrome.runtime.onInstalled.addListener((details) => {
   }
 });
 
+// API base URL
+const API_BASE_URL = 'https://api.cogix.app';
+
 // Listen for messages from content scripts or popup
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   debugLog('BACKGROUND', 'Message received', { 
@@ -21,6 +24,90 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   });
   
   switch (request.type) {
+    case 'API_REQUEST':
+      // Handle API requests from popup to avoid CORS issues
+      const { endpoint, token, options = {} } = request;
+      
+      debugLog('BACKGROUND', 'Making API request', { endpoint, hasToken: !!token });
+      
+      // Set a timeout to ensure we always respond
+      let responded = false;
+      const timeoutId = setTimeout(() => {
+        if (!responded) {
+          responded = true;
+          debugLog('BACKGROUND', 'API request timed out', { endpoint });
+          sendResponse({ error: 'Request timed out after 30 seconds' });
+        }
+      }, 30000); // 30 second timeout
+      
+      // Ensure we always send a response
+      (async () => {
+        try {
+          // Build request options
+          const fetchOptions: RequestInit = {
+            method: options.method || 'GET',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`,
+            },
+          };
+          
+          // Only add body for non-GET requests
+          if (options.body && options.method !== 'GET') {
+            fetchOptions.body = options.body;
+          }
+          
+          const response = await fetch(`${API_BASE_URL}${endpoint}`, fetchOptions);
+          
+          const responseText = await response.text();
+          debugLog('BACKGROUND', 'API response received', { 
+            status: response.status, 
+            ok: response.ok,
+            contentLength: responseText.length 
+          });
+          
+          if (!response.ok) {
+            let errorMessage = `Request failed: ${response.status}`;
+            try {
+              const errorData = JSON.parse(responseText);
+              errorMessage = errorData.detail || errorData.message || errorMessage;
+            } catch (e) {
+              // Response wasn't JSON
+              errorMessage = responseText || errorMessage;
+            }
+            throw new Error(errorMessage);
+          }
+          
+          // Parse JSON response
+          let data;
+          try {
+            data = JSON.parse(responseText);
+          } catch (e) {
+            // Response wasn't JSON, return as-is
+            data = responseText;
+          }
+          
+          if (!responded) {
+            responded = true;
+            clearTimeout(timeoutId);
+            debugLog('BACKGROUND', 'API request successful', { endpoint });
+            sendResponse({ data });
+          }
+        } catch (error: any) {
+          if (!responded) {
+            responded = true;
+            clearTimeout(timeoutId);
+            debugLog('BACKGROUND', 'API request failed', { 
+              endpoint,
+              error: error.message 
+            });
+            sendResponse({ error: error.message });
+          }
+        }
+      })();
+      
+      return true; // Keep message channel open for async response
+      
     case 'GET_AUTH_STATUS':
       // Check authentication status
       chrome.storage.sync.get(['clerkToken', 'clerkUser'], (result) => {

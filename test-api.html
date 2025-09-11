@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test API Integration</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            max-width: 800px;
+            margin: 40px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .card {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .status {
+            padding: 8px 12px;
+            border-radius: 4px;
+            margin-bottom: 10px;
+        }
+        .success { background: #d4edda; color: #155724; }
+        .error { background: #f8d7da; color: #721c24; }
+        .info { background: #d1ecf1; color: #0c5460; }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 10px;
+        }
+        button:hover { background: #0056b3; }
+        pre {
+            background: #f4f4f4;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>Cogix Browser Plugin - API Test</h1>
+    
+    <div class="card">
+        <h2>Extension Status</h2>
+        <div id="extension-status" class="status info">Checking extension...</div>
+        <div id="extension-id"></div>
+    </div>
+
+    <div class="card">
+        <h2>Authentication Status</h2>
+        <div id="auth-status" class="status info">Checking authentication...</div>
+        <button onclick="checkAuth()">Check Auth Status</button>
+        <button onclick="clearAuth()">Clear Auth</button>
+        <pre id="auth-details"></pre>
+    </div>
+
+    <div class="card">
+        <h2>API Test</h2>
+        <button onclick="testProjectsAPI()">Test Projects API</button>
+        <button onclick="testDefaultApiKey()">Test Default API Key</button>
+        <div id="api-status" class="status info" style="display:none;"></div>
+        <pre id="api-response"></pre>
+    </div>
+
+    <div class="card">
+        <h2>Debug Logs</h2>
+        <button onclick="getDebugLogs()">Get Debug Logs</button>
+        <button onclick="clearDebugLogs()">Clear Logs</button>
+        <pre id="debug-logs"></pre>
+    </div>
+
+    <script>
+        // Check if extension is installed
+        function checkExtension() {
+            const extensionId = 'ibpjidejooohhmkcpigmhnafnmkfbfmi';
+            const statusEl = document.getElementById('extension-status');
+            const idEl = document.getElementById('extension-id');
+            
+            if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+                chrome.runtime.sendMessage(extensionId, { type: 'DEBUG_INFO' }, (response) => {
+                    if (chrome.runtime.lastError) {
+                        statusEl.className = 'status error';
+                        statusEl.textContent = 'Extension not installed or not running';
+                        idEl.textContent = 'Expected ID: ' + extensionId;
+                    } else {
+                        statusEl.className = 'status success';
+                        statusEl.textContent = 'Extension is running';
+                        idEl.textContent = 'Extension ID: ' + (response?.extensionId || extensionId);
+                    }
+                });
+            } else {
+                statusEl.className = 'status error';
+                statusEl.textContent = 'Chrome extension API not available';
+            }
+        }
+
+        function checkAuth() {
+            const extensionId = 'ibpjidejooohhmkcpigmhnafnmkfbfmi';
+            chrome.runtime.sendMessage(extensionId, { type: 'GET_AUTH_STATUS' }, (response) => {
+                const statusEl = document.getElementById('auth-status');
+                const detailsEl = document.getElementById('auth-details');
+                
+                if (chrome.runtime.lastError) {
+                    statusEl.className = 'status error';
+                    statusEl.textContent = 'Error: ' + chrome.runtime.lastError.message;
+                    return;
+                }
+                
+                if (response.isAuthenticated) {
+                    statusEl.className = 'status success';
+                    statusEl.textContent = 'Authenticated';
+                    detailsEl.textContent = JSON.stringify(response.user, null, 2);
+                } else {
+                    statusEl.className = 'status info';
+                    statusEl.textContent = 'Not authenticated';
+                    detailsEl.textContent = 'No user data';
+                }
+            });
+        }
+
+        function clearAuth() {
+            const extensionId = 'ibpjidejooohhmkcpigmhnafnmkfbfmi';
+            chrome.runtime.sendMessage(extensionId, { type: 'CLEAR_AUTH' }, (response) => {
+                const statusEl = document.getElementById('auth-status');
+                if (response?.success) {
+                    statusEl.className = 'status success';
+                    statusEl.textContent = 'Auth cleared successfully';
+                    document.getElementById('auth-details').textContent = '';
+                }
+            });
+        }
+
+        function testProjectsAPI() {
+            const extensionId = 'ibpjidejooohhmkcpigmhnafnmkfbfmi';
+            const statusEl = document.getElementById('api-status');
+            const responseEl = document.getElementById('api-response');
+            
+            statusEl.style.display = 'block';
+            statusEl.className = 'status info';
+            statusEl.textContent = 'Testing Projects API...';
+            
+            // First get auth status to get token
+            chrome.runtime.sendMessage(extensionId, { type: 'GET_AUTH_STATUS' }, (authResponse) => {
+                if (!authResponse?.isAuthenticated) {
+                    statusEl.className = 'status error';
+                    statusEl.textContent = 'Not authenticated. Please sign in first.';
+                    return;
+                }
+                
+                // Simulate getting token from storage (in real app, this would be from Clerk)
+                chrome.storage.sync.get(['clerkToken'], (result) => {
+                    const token = result.clerkToken || 'test-token';
+                    
+                    chrome.runtime.sendMessage(extensionId, {
+                        type: 'API_REQUEST',
+                        endpoint: '/api/v1/projects/',
+                        token: token
+                    }, (response) => {
+                        if (chrome.runtime.lastError) {
+                            statusEl.className = 'status error';
+                            statusEl.textContent = 'Error: ' + chrome.runtime.lastError.message;
+                            return;
+                        }
+                        
+                        if (response.error) {
+                            statusEl.className = 'status error';
+                            statusEl.textContent = 'API Error: ' + response.error;
+                            responseEl.textContent = response.error;
+                        } else {
+                            statusEl.className = 'status success';
+                            statusEl.textContent = 'API request successful';
+                            responseEl.textContent = JSON.stringify(response.data, null, 2);
+                        }
+                    });
+                });
+            });
+        }
+
+        function testDefaultApiKey() {
+            const extensionId = 'ibpjidejooohhmkcpigmhnafnmkfbfmi';
+            const statusEl = document.getElementById('api-status');
+            const responseEl = document.getElementById('api-response');
+            
+            statusEl.style.display = 'block';
+            statusEl.className = 'status info';
+            statusEl.textContent = 'Testing Default API Key endpoint...';
+            
+            chrome.storage.sync.get(['clerkToken'], (result) => {
+                const token = result.clerkToken || 'test-token';
+                
+                chrome.runtime.sendMessage(extensionId, {
+                    type: 'API_REQUEST',
+                    endpoint: '/api/v1/api-keys/default',
+                    token: token
+                }, (response) => {
+                    if (response.error) {
+                        statusEl.className = 'status error';
+                        statusEl.textContent = 'API Error: ' + response.error;
+                        responseEl.textContent = response.error;
+                    } else {
+                        statusEl.className = 'status success';
+                        statusEl.textContent = 'API request successful';
+                        responseEl.textContent = JSON.stringify(response.data, null, 2);
+                    }
+                });
+            });
+        }
+
+        function getDebugLogs() {
+            const extensionId = 'ibpjidejooohhmkcpigmhnafnmkfbfmi';
+            chrome.runtime.sendMessage(extensionId, { type: 'DEBUG_INFO' }, (response) => {
+                const logsEl = document.getElementById('debug-logs');
+                if (response?.logs && response.logs.length > 0) {
+                    logsEl.textContent = response.logs.map(log => 
+                        `[${log.timestamp}] [${log.category}] ${log.message}` + 
+                        (log.data ? '\n  Data: ' + log.data : '')
+                    ).join('\n');
+                } else {
+                    logsEl.textContent = 'No debug logs available';
+                }
+            });
+        }
+
+        function clearDebugLogs() {
+            // This would normally call the extension's clear logs function
+            document.getElementById('debug-logs').textContent = 'Logs cleared';
+        }
+
+        // Check extension on load
+        window.addEventListener('load', () => {
+            checkExtension();
+            checkAuth();
+        });
+    </script>
+</body>
+</html>
