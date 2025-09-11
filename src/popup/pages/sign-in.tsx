@@ -17,9 +17,10 @@ export const SignInPage = () => {
   const handleSignInWithWebsite = () => {
     setIsOpening(true)
     // Open the main website sign-in page in a new tab
-    const syncHost = process.env.PLASMO_PUBLIC_CLERK_SYNC_HOST || 'https://cogix.app'
+    // Note: Using cogix.app main site, not clerk subdomain for user-facing URLs
+    const mainSiteUrl = 'https://cogix.app'
     chrome.tabs.create({ 
-      url: `${syncHost}/sign-in?redirect_url=/projects` 
+      url: `${mainSiteUrl}/sign-in?redirect_url=/projects` 
     }, () => {
       // Close the extension popup after opening the tab
       window.close()
@@ -29,9 +30,10 @@ export const SignInPage = () => {
   const handleSignUpWithWebsite = () => {
     setIsOpening(true)
     // Open the main website sign-up page in a new tab
-    const syncHost = process.env.PLASMO_PUBLIC_CLERK_SYNC_HOST || 'https://cogix.app'
+    // Note: Using cogix.app main site, not clerk subdomain for user-facing URLs
+    const mainSiteUrl = 'https://cogix.app'
     chrome.tabs.create({ 
-      url: `${syncHost}/sign-up?redirect_url=/projects` 
+      url: `${mainSiteUrl}/sign-up?redirect_url=/projects` 
     }, () => {
       // Close the extension popup after opening the tab
       window.close()

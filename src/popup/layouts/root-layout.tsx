@@ -39,7 +39,7 @@ export const RootLayout = () => {
       }}
       publishableKey={PUBLISHABLE_KEY}
       afterSignOutUrl="/"
-      afterSignInUrl="/"
+      fallbackRedirectUrl="/"
       syncHost={SYNC_HOST}
     >
       <div className="plasmo-w-[380px] plasmo-h-[600px] plasmo-bg-white plasmo-flex plasmo-flex-col plasmo-overflow-hidden">
