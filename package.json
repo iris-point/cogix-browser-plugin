@@ -7,7 +7,9 @@
   "scripts": {
     "dev": "plasmo dev",
     "build": "plasmo build",
-    "package": "plasmo package"
+    "package": "plasmo package",
+    "package:crx": "powershell -ExecutionPolicy Bypass -File create-crx.ps1",
+    "package:all": "npm run build && npm run package && npm run package:crx"
   },
   "dependencies": {
     "@clerk/chrome-extension": "^2.5.31",
@@ -30,6 +32,7 @@
     "typescript": "5.3.3"
   },
   "manifest": {
+    "key": "$CRX_PUBLIC_KEY",
     "permissions": [
       "cookies",
       "storage",

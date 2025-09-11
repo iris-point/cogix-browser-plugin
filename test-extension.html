@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cogix Browser Extension Test Page</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        .container {
+            background: white;
+            border-radius: 12px;
+            padding: 30px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+        }
+        .section {
+            margin: 30px 0;
+            padding: 20px;
+            background: #f9fafb;
+            border-radius: 8px;
+            border: 1px solid #e5e7eb;
+        }
+        .status-item {
+            display: flex;
+            align-items: center;
+            padding: 10px;
+            margin: 5px 0;
+            background: white;
+            border-radius: 6px;
+            border: 1px solid #e5e7eb;
+        }
+        .status-icon {
+            width: 20px;
+            height: 20px;
+            margin-right: 10px;
+            border-radius: 50%;
+        }
+        .status-success { background: #10b981; }
+        .status-error { background: #ef4444; }
+        .status-warning { background: #f59e0b; }
+        .status-pending { background: #6b7280; }
+        
+        button {
+            background: #3b82f6;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            margin: 5px;
+        }
+        button:hover {
+            background: #2563eb;
+        }
+        button:disabled {
+            background: #9ca3af;
+            cursor: not-allowed;
+        }
+        
+        .log-container {
+            background: #1f2937;
+            color: #10b981;
+            padding: 15px;
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .log-entry {
+            margin: 2px 0;
+            padding: 2px 0;
+            border-bottom: 1px solid #374151;
+        }
+        .log-time { color: #6b7280; }
+        .log-category { color: #fbbf24; }
+        .log-message { color: #10b981; }
+        .log-data { color: #60a5fa; margin-left: 20px; }
+        
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+        .info-card {
+            background: white;
+            padding: 15px;
+            border-radius: 6px;
+            border: 1px solid #e5e7eb;
+        }
+        .info-label {
+            font-size: 12px;
+            color: #6b7280;
+            margin-bottom: 5px;
+        }
+        .info-value {
+            font-size: 14px;
+            font-weight: 600;
+            color: #111827;
+            word-break: break-all;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔧 Cogix Browser Extension Debug Tool</h1>
+        <p class="subtitle">Test and debug the Cogix eye tracking browser extension</p>
+
+        <!-- Status Section -->
+        <div class="section">
+            <h2>📊 Extension Status</h2>
+            <div id="status-list">
+                <div class="status-item">
+                    <div class="status-icon status-pending"></div>
+                    <span>Checking extension...</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Extension Info -->
+        <div class="section">
+            <h2>ℹ️ Extension Information</h2>
+            <div class="info-grid" id="extension-info">
+                <div class="info-card">
+                    <div class="info-label">Extension ID</div>
+                    <div class="info-value" id="ext-id">Not detected</div>
+                </div>
+                <div class="info-card">
+                    <div class="info-label">Version</div>
+                    <div class="info-value" id="ext-version">Unknown</div>
+                </div>
+                <div class="info-card">
+                    <div class="info-label">Sync Host</div>
+                    <div class="info-value" id="sync-host">Unknown</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Test Actions -->
+        <div class="section">
+            <h2>🧪 Test Actions</h2>
+            <div>
+                <button onclick="checkExtension()">Check Extension</button>
+                <button onclick="testAuthentication()">Test Authentication</button>
+                <button onclick="getDebugInfo()">Get Debug Info</button>
+                <button onclick="clearLogs()">Clear Logs</button>
+                <button onclick="testMessage()">Test Message</button>
+            </div>
+        </div>
+
+        <!-- Debug Console -->
+        <div class="section">
+            <h2>🖥️ Debug Console</h2>
+            <div class="log-container" id="console">
+                <div class="log-entry">
+                    <span class="log-time">[00:00:00]</span>
+                    <span class="log-category">[SYSTEM]</span>
+                    <span class="log-message">Debug console ready</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Instructions -->
+        <div class="section">
+            <h2>📚 How to Use</h2>
+            <ol>
+                <li><strong>Install the Extension:</strong>
+                    <ul>
+                        <li>Open Chrome and go to <code>chrome://extensions/</code></li>
+                        <li>Enable "Developer mode"</li>
+                        <li>Click "Load unpacked"</li>
+                        <li>Select the <code>cogix-browser-plugin/build/chrome-mv3-dev</code> folder</li>
+                    </ul>
+                </li>
+                <li><strong>Open this test page</strong> in Chrome after installing the extension</li>
+                <li><strong>Click "Check Extension"</strong> to verify the extension is loaded</li>
+                <li><strong>Test various features</strong> using the buttons above</li>
+                <li><strong>Check the Debug Console</strong> for real-time logs</li>
+                <li><strong>Open the extension popup</strong> and navigate to the Debug page for more info</li>
+            </ol>
+        </div>
+    </div>
+
+    <script>
+        const EXTENSION_ID = 'YOUR_EXTENSION_ID'; // Will be auto-detected
+        let detectedExtensionId = null;
+
+        function log(category, message, data = null) {
+            const time = new Date().toLocaleTimeString();
+            const console = document.getElementById('console');
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            
+            let html = `
+                <span class="log-time">[${time}]</span>
+                <span class="log-category">[${category}]</span>
+                <span class="log-message">${message}</span>
+            `;
+            
+            if (data) {
+                html += `<div class="log-data">${JSON.stringify(data, null, 2)}</div>`;
+            }
+            
+            entry.innerHTML = html;
+            console.appendChild(entry);
+            console.scrollTop = console.scrollHeight;
+        }
+
+        function updateStatus(message, type = 'pending') {
+            const statusList = document.getElementById('status-list');
+            const item = document.createElement('div');
+            item.className = 'status-item';
+            item.innerHTML = `
+                <div class="status-icon status-${type}"></div>
+                <span>${message}</span>
+            `;
+            statusList.appendChild(item);
+        }
+
+        async function checkExtension() {
+            log('CHECK', 'Checking for Cogix extension...');
+            
+            // Try to detect the extension by sending a message
+            if (chrome && chrome.runtime) {
+                // First, try to get all installed extensions (this might not work due to permissions)
+                try {
+                    // Try sending a message to our extension
+                    chrome.runtime.sendMessage(detectedExtensionId || EXTENSION_ID, 
+                        { type: 'PING' }, 
+                        (response) => {
+                            if (chrome.runtime.lastError) {
+                                log('ERROR', 'Extension not found or not responding', chrome.runtime.lastError);
+                                updateStatus('Extension not detected', 'error');
+                            } else {
+                                log('SUCCESS', 'Extension detected!', response);
+                                updateStatus('Extension is active', 'success');
+                                detectedExtensionId = response?.extensionId || detectedExtensionId;
+                                document.getElementById('ext-id').textContent = detectedExtensionId || 'Detected';
+                            }
+                        }
+                    );
+                } catch (error) {
+                    log('ERROR', 'Failed to communicate with extension', error);
+                    updateStatus('Communication error', 'error');
+                }
+            } else {
+                log('ERROR', 'Chrome extension API not available');
+                updateStatus('Chrome API not available', 'error');
+            }
+        }
+
+        async function testAuthentication() {
+            log('AUTH', 'Testing authentication status...');
+            
+            if (!detectedExtensionId) {
+                log('WARNING', 'Please check extension first');
+                return;
+            }
+            
+            chrome.runtime.sendMessage(detectedExtensionId, 
+                { type: 'GET_AUTH_STATUS' }, 
+                (response) => {
+                    if (chrome.runtime.lastError) {
+                        log('ERROR', 'Auth check failed', chrome.runtime.lastError);
+                    } else {
+                        log('AUTH', 'Authentication status', response);
+                        updateStatus(
+                            response?.isAuthenticated ? 'User authenticated' : 'Not authenticated',
+                            response?.isAuthenticated ? 'success' : 'warning'
+                        );
+                    }
+                }
+            );
+        }
+
+        async function getDebugInfo() {
+            log('DEBUG', 'Requesting debug information...');
+            
+            if (!detectedExtensionId) {
+                log('WARNING', 'Please check extension first');
+                return;
+            }
+            
+            chrome.runtime.sendMessage(detectedExtensionId, 
+                { type: 'DEBUG_INFO' }, 
+                (response) => {
+                    if (chrome.runtime.lastError) {
+                        log('ERROR', 'Debug info request failed', chrome.runtime.lastError);
+                    } else {
+                        log('DEBUG', 'Debug information received', response);
+                        
+                        // Update UI with extension info
+                        if (response?.extensionId) {
+                            document.getElementById('ext-id').textContent = response.extensionId;
+                        }
+                        if (response?.manifestVersion) {
+                            document.getElementById('ext-version').textContent = response.manifestVersion;
+                        }
+                        
+                        // Display logs
+                        if (response?.logs && response.logs.length > 0) {
+                            response.logs.forEach(logEntry => {
+                                log(logEntry.category, logEntry.message, logEntry.data);
+                            });
+                        }
+                    }
+                }
+            );
+        }
+
+        function clearLogs() {
+            const console = document.getElementById('console');
+            console.innerHTML = `
+                <div class="log-entry">
+                    <span class="log-time">[${new Date().toLocaleTimeString()}]</span>
+                    <span class="log-category">[SYSTEM]</span>
+                    <span class="log-message">Console cleared</span>
+                </div>
+            `;
+            log('SYSTEM', 'Logs cleared');
+        }
+
+        function testMessage() {
+            const message = prompt('Enter message type to send:', 'PING');
+            if (message) {
+                log('TEST', `Sending message: ${message}`);
+                
+                chrome.runtime.sendMessage(detectedExtensionId || EXTENSION_ID, 
+                    { type: message }, 
+                    (response) => {
+                        if (chrome.runtime.lastError) {
+                            log('ERROR', 'Message failed', chrome.runtime.lastError);
+                        } else {
+                            log('RESPONSE', 'Message response', response);
+                        }
+                    }
+                );
+            }
+        }
+
+        // Auto-check on load
+        window.addEventListener('load', () => {
+            setTimeout(checkExtension, 1000);
+        });
+    </script>
+</body>
+</html>
