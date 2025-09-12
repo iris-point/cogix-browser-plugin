@@ -74,7 +74,22 @@ npm ERR! path /path/to/package.json
 2. Check Node.js version compatibility (workflow uses Node 18)
 3. Clear npm cache: add step with `npm cache clean --force`
 
-### 5. Environment Variables Missing
+### 5. Zip File Not Found Error
+
+**Error Message:**
+```
+mv: cannot stat 'build/chrome-mv3-prod.zip': No such file or directory
+```
+
+**Cause:** Plasmo may not create the zip file automatically in CI environment.
+
+**Solution:** ✅ **FIXED** - The workflow now:
+1. Runs both `npm run build` and `npm run package`
+2. Has fallback logic to find zip files in alternative locations
+3. Creates zip manually if needed: `zip -r ../output.zip .`
+4. Includes debugging steps to show what files are created
+
+### 6. Environment Variables Missing
 
 **Error Message:**
 ```
@@ -92,7 +107,7 @@ env:
   PLASMO_PUBLIC_CLERK_SYNC_HOST: ${{ secrets.CLERK_SYNC_HOST }}
 ```
 
-### 6. Workflow Not Triggering
+### 7. Workflow Not Triggering
 
 **Possible Causes:**
 - Tag format doesn't match pattern (`v*.*.*`)

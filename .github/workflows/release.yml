@@ -33,6 +33,20 @@ jobs:
         env:
           NODE_NO_WARNINGS: 1
           
+      - name: Package extension
+        run: npm run package
+        env:
+          NODE_NO_WARNINGS: 1
+          
+      - name: Debug build output
+        run: |
+          echo "Build directory contents:"
+          ls -la build/ || echo "Build directory not found"
+          echo "Root directory contents:"
+          ls -la
+          echo "Looking for zip files:"
+          find . -name "*.zip" -type f || echo "No zip files found"
+          
       - name: Get version from package.json
         id: package-version
         run: |
@@ -42,7 +56,22 @@ jobs:
           
       - name: Rename zip file with version
         run: |
-          mv build/chrome-mv3-prod.zip build/cogix-browser-plugin-chrome-v${{ steps.package-version.outputs.version }}.zip
+          # First try the expected location
+          if [ -f "build/chrome-mv3-prod.zip" ]; then
+            echo "Found zip file at build/chrome-mv3-prod.zip"
+            mv build/chrome-mv3-prod.zip build/cogix-browser-plugin-chrome-v${{ steps.package-version.outputs.version }}.zip
+          else
+            echo "Looking for zip files in alternative locations..."
+            # Look for any zip file in build directory
+            ZIP_FILE=$(find build -name "*.zip" -type f | head -1)
+            if [ -n "$ZIP_FILE" ]; then
+              echo "Found zip file at: $ZIP_FILE"
+              mv "$ZIP_FILE" build/cogix-browser-plugin-chrome-v${{ steps.package-version.outputs.version }}.zip
+            else
+              echo "No zip file found! Creating one manually..."
+              cd build/chrome-mv3-prod && zip -r ../cogix-browser-plugin-chrome-v${{ steps.package-version.outputs.version }}.zip .
+            fi
+          fi
           
       - name: Verify build output
         run: |
