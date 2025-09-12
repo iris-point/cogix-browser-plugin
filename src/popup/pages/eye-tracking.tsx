@@ -6,7 +6,6 @@ import { useEyeTracker } from '../../contexts/EyeTrackerContext'
 export const EyeTrackingPage = () => {
   const { user } = useUser()
   const {
-    eyeTracker,
     deviceStatus,
     isCalibrating,
     calibrationResult,
@@ -19,7 +18,6 @@ export const EyeTrackingPage = () => {
   } = useEyeTracker()
   
   const imgRef = useRef<HTMLImageElement>(null)
-  const calibrationContainerRef = useRef<HTMLDivElement>(null)
   
   // Set up camera image when connected
   useEffect(() => {
@@ -40,19 +38,71 @@ export const EyeTrackingPage = () => {
     }
   }
   
-  const handleStartCalibration = () => {
-    if (!eyeTracker || deviceStatus !== DeviceStatus.CONNECTED) {
+  const handleDisconnect = async () => {
+    const confirmed = confirm(
+      'Are you sure you want to disconnect the eye tracker?\n\n' +
+      'This will:\n' +
+      '• Stop all eye tracking data collection\n' +
+      '• End any active recording sessions\n' +
+      '• Close the persistent background connection\n\n' +
+      'You will need to reconnect to use eye tracking again.'
+    )
+    
+    if (confirmed) {
+      console.log('User confirmed disconnect')
+      try {
+        await disconnect()
+        console.log('Disconnect completed successfully')
+      } catch (error: any) {
+        console.error('Failed to disconnect:', error)
+        alert(`Failed to disconnect: ${error.message}`)
+      }
+    } else {
+      console.log('User cancelled disconnect')
+    }
+  }
+  
+  const handleStartCalibration = async () => {
+    if (deviceStatus !== DeviceStatus.CONNECTED) {
       alert('Please connect to the eye tracker first')
       return
     }
     
-    // Use the eye tracker's built-in calibration method
     try {
-      eyeTracker.startCalibration()
-      console.log('Calibration started successfully')
+      // First test if content script is available
+      const tabs = await chrome.tabs.query({ active: true, currentWindow: true })
+      if (!tabs[0]?.id) {
+        alert('Please navigate to a web page first to start calibration')
+        return
+      }
+      
+      // Test content script connection
+      try {
+        const pingResponse = await chrome.tabs.sendMessage(tabs[0].id, { type: 'PING' })
+        console.log('Content script ping successful:', pingResponse)
+      } catch (pingError) {
+        console.error('Content script not available:', pingError)
+        alert('Content script not loaded. Please:\n1. Refresh the current page\n2. Make sure you are on a regular web page (not chrome:// or extension pages)\n3. Try again')
+        return
+      }
+      
+      // Send calibration start message
+      const response = await chrome.tabs.sendMessage(tabs[0].id, {
+        type: 'START_CALIBRATION'
+      })
+      
+      console.log('Calibration start response:', response)
+      
+      if (response.success) {
+        console.log('Full-screen calibration started successfully')
+        // The popup can stay open, calibration will happen on the page
+      } else {
+        alert('Failed to start calibration on the page')
+      }
+      
     } catch (error) {
       console.error('Failed to start calibration:', error)
-      alert('Failed to start calibration. Please try again.')
+      alert(`Failed to start calibration: ${error.message}\n\nTroubleshooting:\n1. Refresh the current page\n2. Make sure you are on a regular web page\n3. Check browser console for details`)
     }
   }
   
@@ -88,10 +138,10 @@ export const EyeTrackingPage = () => {
   
   return (
     <div className="plasmo-p-4 plasmo-h-full plasmo-overflow-y-auto">
-      <h2 className="plasmo-text-xl plasmo-font-bold plasmo-mb-4 plasmo-text-[var(--foreground)]">Eye Tracking</h2>
+      <h2 className="plasmo-text-xl plasmo-font-bold plasmo-mb-3 plasmo-text-[var(--foreground)]">Eye Tracking</h2>
       
       {/* Connection Status */}
-      <div className="plasmo-mb-4 plasmo-p-4 plasmo-bg-white plasmo-rounded-lg plasmo-border plasmo-border-gray-200">
+      <div className="plasmo-mb-3 plasmo-p-3 plasmo-bg-white plasmo-rounded-lg plasmo-border plasmo-border-gray-200">
         <h3 className="plasmo-text-sm plasmo-font-semibold plasmo-mb-2">Connection Status</h3>
         <div className={`plasmo-inline-flex plasmo-items-center plasmo-px-3 plasmo-py-1 plasmo-rounded-full plasmo-text-sm plasmo-font-medium ${getStatusColor(deviceStatus)}`}>
           <div className={`plasmo-w-2 plasmo-h-2 plasmo-rounded-full plasmo-mr-2 ${
@@ -103,20 +153,31 @@ export const EyeTrackingPage = () => {
           {getStatusText(deviceStatus)}
         </div>
         {deviceStatus === DeviceStatus.CONNECTED && (
-          <p className="plasmo-text-xs plasmo-text-gray-500 plasmo-mt-2">
-            Eye tracker is connected and ready. You can now calibrate or navigate to any page to start tracking.
-          </p>
+          <div className="plasmo-mt-2">
+            <p className="plasmo-text-xs plasmo-text-gray-500 plasmo-mb-2">
+              Connected and ready for calibration. Connection persists even when popup is closed.
+            </p>
+            <button
+              onClick={handleDisconnect}
+              className="plasmo-inline-flex plasmo-items-center plasmo-px-3 plasmo-py-1 plasmo-bg-red-100 plasmo-text-red-700 plasmo-rounded-md plasmo-text-xs plasmo-font-medium hover:plasmo-bg-red-200 plasmo-transition-colors"
+            >
+              <svg className="plasmo-w-3 plasmo-h-3 plasmo-mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+              Force Disconnect
+            </button>
+          </div>
         )}
       </div>
       
       {/* Connection Controls */}
-      <div className="plasmo-mb-4 plasmo-p-4 plasmo-bg-white plasmo-rounded-lg plasmo-border plasmo-border-gray-200">
+      <div className="plasmo-mb-3 plasmo-p-3 plasmo-bg-white plasmo-rounded-lg plasmo-border plasmo-border-gray-200">
         <h3 className="plasmo-text-sm plasmo-font-semibold plasmo-mb-2">WebSocket URL</h3>
         <input
           type="text"
           value={wsUrl}
           onChange={(e) => setWsUrl(e.target.value)}
-          className="plasmo-w-full plasmo-px-3 plasmo-py-2 plasmo-border plasmo-border-gray-300 plasmo-rounded-md plasmo-text-sm plasmo-mb-3"
+          className="plasmo-w-full plasmo-px-3 plasmo-py-1.5 plasmo-border plasmo-border-gray-300 plasmo-rounded-md plasmo-text-sm plasmo-mb-2"
           placeholder="wss://127.0.0.1:8443"
           disabled={deviceStatus === DeviceStatus.CONNECTED || deviceStatus === DeviceStatus.CONNECTING}
         />
@@ -129,9 +190,13 @@ export const EyeTrackingPage = () => {
             Connect
           </button>
           <button
-            onClick={disconnect}
+            onClick={handleDisconnect}
             disabled={deviceStatus !== DeviceStatus.CONNECTED}
-            className="plasmo-flex-1 plasmo-px-4 plasmo-py-2 plasmo-bg-gray-600 plasmo-text-white plasmo-rounded-md plasmo-text-sm plasmo-font-medium hover:plasmo-bg-gray-700 disabled:plasmo-opacity-50 disabled:plasmo-cursor-not-allowed"
+            className={`plasmo-flex-1 plasmo-px-4 plasmo-py-2 plasmo-text-white plasmo-rounded-md plasmo-text-sm plasmo-font-medium disabled:plasmo-opacity-50 disabled:plasmo-cursor-not-allowed ${
+              deviceStatus === DeviceStatus.CONNECTED 
+                ? 'plasmo-bg-red-600 hover:plasmo-bg-red-700' 
+                : 'plasmo-bg-gray-600 hover:plasmo-bg-gray-700'
+            }`}
           >
             Disconnect
           </button>
@@ -139,10 +204,10 @@ export const EyeTrackingPage = () => {
       </div>
       
       {/* Calibration */}
-      <div className="plasmo-mb-4 plasmo-p-4 plasmo-bg-white plasmo-rounded-lg plasmo-border plasmo-border-gray-200">
+      <div className="plasmo-mb-3 plasmo-p-3 plasmo-bg-white plasmo-rounded-lg plasmo-border plasmo-border-gray-200">
         <h3 className="plasmo-text-sm plasmo-font-semibold plasmo-mb-2">Calibration</h3>
         {calibrationResult && (
-          <div className="plasmo-mb-3 plasmo-p-2 plasmo-bg-green-50 plasmo-border plasmo-border-green-200 plasmo-rounded plasmo-text-sm">
+          <div className="plasmo-mb-2 plasmo-p-2 plasmo-bg-green-50 plasmo-border plasmo-border-green-200 plasmo-rounded plasmo-text-xs">
             <div className="plasmo-text-green-800">
               ✓ Calibrated (Accuracy: {calibrationResult.accuracy?.toFixed(2) || 'N/A'})
             </div>
@@ -157,29 +222,11 @@ export const EyeTrackingPage = () => {
         </button>
       </div>
       
-      {/* SDK Download */}
-      <div className="plasmo-mb-4 plasmo-p-4 plasmo-bg-blue-50 plasmo-rounded-lg plasmo-border plasmo-border-blue-200">
-        <h3 className="plasmo-text-sm plasmo-font-semibold plasmo-mb-2 plasmo-text-blue-900">Eye Tracking SDK</h3>
-        <p className="plasmo-text-xs plasmo-text-blue-700 plasmo-mb-3">
-          Download and install the Cogix Eye Tracking SDK to connect your eye tracker device.
-        </p>
-        <a
-          href="https://github.com/iris-point/cogix-eye-tracking-installer/releases/download/v1.0.1/CogixEyeTracking-Setup.exe"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="plasmo-inline-flex plasmo-items-center plasmo-px-4 plasmo-py-2 plasmo-bg-blue-600 plasmo-text-white plasmo-rounded-md plasmo-text-sm plasmo-font-medium hover:plasmo-bg-blue-700 plasmo-transition-colors"
-        >
-          <svg className="plasmo-w-4 plasmo-h-4 plasmo-mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10" />
-          </svg>
-          Download SDK Installer
-        </a>
-      </div>
       
       {/* Camera View */}
-      <div className="plasmo-mb-4 plasmo-p-4 plasmo-bg-white plasmo-rounded-lg plasmo-border plasmo-border-gray-200">
+      <div className="plasmo-p-3 plasmo-bg-white plasmo-rounded-lg plasmo-border plasmo-border-gray-200">
         <h3 className="plasmo-text-sm plasmo-font-semibold plasmo-mb-2">Camera View</h3>
-        <div className="plasmo-relative plasmo-w-full plasmo-h-48 plasmo-bg-gray-100 plasmo-rounded plasmo-overflow-hidden">
+        <div className="plasmo-relative plasmo-w-full plasmo-h-40 plasmo-bg-gray-100 plasmo-rounded plasmo-overflow-hidden">
           <img 
             ref={imgRef}
             className="plasmo-absolute plasmo-inset-0 plasmo-w-full plasmo-h-full plasmo-object-cover"
@@ -198,14 +245,7 @@ export const EyeTrackingPage = () => {
         </div>
       </div>
       
-      {/* Calibration Container (full screen overlay when calibrating) */}
-      {isCalibrating && (
-        <div 
-          ref={calibrationContainerRef}
-          className="plasmo-fixed plasmo-inset-0 plasmo-z-50"
-          style={{ backgroundColor: '#1f2937' }}
-        />
-      )}
+      {/* Note: Calibration is handled by content script for full-screen overlay */}
     </div>
   )
 }

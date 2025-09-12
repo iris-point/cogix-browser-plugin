@@ -9,6 +9,9 @@ export const config: PlasmoCSConfig = {
 
 const storage = new Storage()
 
+// Debug: Log that content script is loaded
+console.log('Cogix content script loaded on:', window.location.href)
+
 // Screen recording state
 let isRecording = false
 let recordingStartTime: number | null = null
@@ -579,8 +582,248 @@ function hideRecordingIndicator(): void {
   }
 }
 
+// Calibration state
+let isCalibrating = false
+let calibrationOverlay: HTMLElement | null = null
+let calibrationPoints = [
+  { x: 0.1, y: 0.1 },  // Top-left
+  { x: 0.9, y: 0.1 },  // Top-right  
+  { x: 0.5, y: 0.5 },  // Center
+  { x: 0.1, y: 0.9 },  // Bottom-left
+  { x: 0.9, y: 0.9 }   // Bottom-right
+]
+let currentCalibrationPoint = 0
+
+// Keyboard handler for calibration control
+const handleCalibrationKeyPress = (event: KeyboardEvent) => {
+  if (!isCalibrating) return
+  
+  switch (event.key) {
+    case 'Escape':
+      console.log('ESC pressed - cancelling calibration')
+      stopCalibration()
+      break
+    case ' ': // Spacebar
+      console.log('SPACE pressed - skipping to next point')
+      event.preventDefault()
+      if (currentCalibrationPoint < calibrationPoints.length - 1) {
+        currentCalibrationPoint++
+        showCalibrationPoint(currentCalibrationPoint)
+      } else {
+        stopCalibration()
+      }
+      break
+  }
+}
+
+async function startCalibration() {
+  if (isCalibrating) return
+  
+  console.log('Starting full-screen calibration...')
+  isCalibrating = true
+  currentCalibrationPoint = 0
+  
+  // Request fullscreen first (like the emotion experiment)
+  try {
+    const element = document.documentElement
+    if (element.requestFullscreen) {
+      await element.requestFullscreen()
+    } else if ((element as any).mozRequestFullScreen) {
+      await (element as any).mozRequestFullScreen()
+    } else if ((element as any).webkitRequestFullscreen) {
+      await (element as any).webkitRequestFullscreen()
+    } else if ((element as any).msRequestFullscreen) {
+      await (element as any).msRequestFullscreen()
+    }
+    console.log('Fullscreen mode activated')
+  } catch (error) {
+    console.warn('Could not enter fullscreen:', error)
+    // Continue with calibration even if fullscreen fails
+  }
+  
+  // Create full-screen calibration overlay
+  calibrationOverlay = document.createElement('div')
+  calibrationOverlay.id = 'cogix-calibration-overlay'
+  calibrationOverlay.style.cssText = `
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    background: #252A3D !important;
+    z-index: 2147483650 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    font-family: system-ui, -apple-system, sans-serif !important;
+    color: white !important;
+  `
+  
+  // Add instructions
+  const instructions = document.createElement('div')
+  instructions.style.cssText = `
+    position: absolute !important;
+    top: 10% !important;
+    left: 50% !important;
+    transform: translateX(-50%) !important;
+    text-align: center !important;
+    font-size: 28px !important;
+    font-weight: 500 !important;
+  `
+  instructions.innerHTML = `
+    <h2 style="margin-bottom: 30px; font-size: 36px;">Eye Tracker Calibration</h2>
+    <p style="margin-bottom: 20px;">Look at each point that appears and keep your head still</p>
+    <p style="font-size: 24px; color: #4CAF50;">Point <span id="calibration-progress">1</span> of 5</p>
+    <div style="margin-top: 40px; font-size: 18px; color: #aaa;">
+      <p>Press <strong>ESC</strong> to cancel calibration</p>
+      <p>Press <strong>SPACE</strong> to skip to next point</p>
+    </div>
+  `
+  
+  // Add cancel button in bottom center to avoid overlap with calibration points
+  const cancelButton = document.createElement('button')
+  cancelButton.style.cssText = `
+    position: absolute !important;
+    bottom: 50px !important;
+    left: 50% !important;
+    transform: translateX(-50%) !important;
+    background: rgba(239, 68, 68, 0.9) !important;
+    color: white !important;
+    border: none !important;
+    padding: 15px 30px !important;
+    border-radius: 8px !important;
+    font-size: 18px !important;
+    font-weight: 500 !important;
+    cursor: pointer !important;
+    transition: all 0.2s ease !important;
+    z-index: 2147483651 !important;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3) !important;
+  `
+  cancelButton.textContent = '✕ Cancel Calibration (ESC)'
+  cancelButton.onclick = () => {
+    console.log('Cancel button clicked')
+    stopCalibration()
+  }
+  
+  // Add hover effect
+  cancelButton.onmouseover = () => {
+    cancelButton.style.background = 'rgba(239, 68, 68, 1)'
+    cancelButton.style.transform = 'translateX(-50%) translateY(-2px)'
+  }
+  cancelButton.onmouseout = () => {
+    cancelButton.style.background = 'rgba(239, 68, 68, 0.9)'
+    cancelButton.style.transform = 'translateX(-50%)'
+  }
+  
+  calibrationOverlay.appendChild(instructions)
+  calibrationOverlay.appendChild(cancelButton)
+  document.body.appendChild(calibrationOverlay)
+  
+  // Add keyboard event handlers for calibration control
+  document.addEventListener('keydown', handleCalibrationKeyPress)
+  
+  // Show first calibration point after a delay
+  setTimeout(() => {
+    showCalibrationPoint(0)
+    
+    // Send calibration start message to background to trigger eye tracker
+    chrome.runtime.sendMessage({
+      type: 'START_EYE_TRACKER_CALIBRATION'
+    }).catch(error => {
+      console.error('Failed to send calibration start message:', error)
+    })
+  }, 1000) // 1 second delay like the emotion experiment
+}
+
+function showCalibrationPoint(pointIndex: number) {
+  if (!calibrationOverlay || pointIndex >= calibrationPoints.length) return
+  
+  // Remove existing point
+  const existingPoint = document.getElementById('calibration-point')
+  if (existingPoint) {
+    existingPoint.remove()
+  }
+  
+  const point = calibrationPoints[pointIndex]
+  const pointElement = document.createElement('div')
+  pointElement.id = 'calibration-point'
+  pointElement.style.cssText = `
+    position: absolute !important;
+    width: 20px !important;
+    height: 20px !important;
+    border-radius: 50% !important;
+    background: #4CAF50 !important;
+    border: 3px solid white !important;
+    box-shadow: 0 0 20px rgba(76, 175, 80, 0.6) !important;
+    transform: translate(-50%, -50%) !important;
+    left: ${point.x * 100}% !important;
+    top: ${point.y * 100}% !important;
+    animation: calibrationPulse 1s infinite alternate !important;
+  `
+  
+  // Add pulse animation
+  if (!document.getElementById('calibration-styles')) {
+    const style = document.createElement('style')
+    style.id = 'calibration-styles'
+    style.textContent = `
+      @keyframes calibrationPulse {
+        0% { transform: translate(-50%, -50%) scale(1); }
+        100% { transform: translate(-50%, -50%) scale(1.2); }
+      }
+    `
+    document.head.appendChild(style)
+  }
+  
+  calibrationOverlay.appendChild(pointElement)
+  
+  // Update progress
+  const progressElement = document.getElementById('calibration-progress')
+  if (progressElement) {
+    progressElement.textContent = (pointIndex + 1).toString()
+  }
+}
+
+function stopCalibration() {
+  console.log('Stopping calibration...')
+  isCalibrating = false
+  currentCalibrationPoint = 0
+  
+  // Remove keyboard event handlers
+  document.removeEventListener('keydown', handleCalibrationKeyPress)
+  
+  if (calibrationOverlay) {
+    calibrationOverlay.remove()
+    calibrationOverlay = null
+  }
+  
+  // Remove calibration styles
+  const styles = document.getElementById('calibration-styles')
+  if (styles) {
+    styles.remove()
+  }
+  
+  // Exit fullscreen (optional - user can stay in fullscreen if they want)
+  try {
+    if (document.fullscreenElement) {
+      document.exitFullscreen()
+      console.log('Exited fullscreen mode')
+    }
+  } catch (error) {
+    console.warn('Could not exit fullscreen:', error)
+  }
+  
+  // Send stop message to background
+  chrome.runtime.sendMessage({
+    type: 'STOP_EYE_TRACKER_CALIBRATION'
+  }).catch(error => {
+    console.error('Failed to send calibration stop message:', error)
+  })
+}
+
 // Listen for messages from background script and popup
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  console.log('Content script received message:', message.type)
+  
   switch (message.type) {
     case 'START_RECORDING':
       startScreenRecording(message.projectId)
@@ -590,6 +833,37 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     case 'STOP_RECORDING':
       stopScreenRecording()
       sendResponse({ success: true })
+      break
+      
+    case 'START_CALIBRATION':
+      console.log('Starting calibration from content script')
+      startCalibration()
+      sendResponse({ success: true })
+      break
+      
+    case 'PING':
+      // Simple test message to verify content script is working
+      console.log('Content script ping received')
+      sendResponse({ success: true, location: window.location.href })
+      break
+      
+    case 'STOP_CALIBRATION':
+      stopCalibration()
+      sendResponse({ success: true })
+      break
+      
+    case 'CALIBRATION_PROGRESS':
+      // Handle calibration progress from eye tracker
+      if (message.current < 5) {
+        showCalibrationPoint(message.current)
+      }
+      break
+      
+    case 'CALIBRATION_COMPLETE':
+      // Calibration finished
+      setTimeout(() => {
+        stopCalibration()
+      }, 2000) // Show completion for 2 seconds
       break
       
     case 'GAZE_DATA':

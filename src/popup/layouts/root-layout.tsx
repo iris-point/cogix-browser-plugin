@@ -101,19 +101,25 @@ const LayoutContent = () => {
             <div className="plasmo-flex plasmo-gap-1">
               <Link 
                 to="/" 
-                className="plasmo-px-3 plasmo-py-1.5 plasmo-text-sm plasmo-font-medium plasmo-text-gray-700 hover:plasmo-text-indigo-600 hover:plasmo-bg-indigo-50 plasmo-rounded-md plasmo-transition-colors"
+                className="plasmo-px-2 plasmo-py-1.5 plasmo-text-xs plasmo-font-medium plasmo-text-gray-700 hover:plasmo-text-indigo-600 hover:plasmo-bg-indigo-50 plasmo-rounded-md plasmo-transition-colors"
               >
                 Home
               </Link>
               <Link 
                 to="/eye-tracking" 
-                className="plasmo-px-3 plasmo-py-1.5 plasmo-text-sm plasmo-font-medium plasmo-text-gray-700 hover:plasmo-text-indigo-600 hover:plasmo-bg-indigo-50 plasmo-rounded-md plasmo-transition-colors"
+                className="plasmo-px-2 plasmo-py-1.5 plasmo-text-xs plasmo-font-medium plasmo-text-gray-700 hover:plasmo-text-indigo-600 hover:plasmo-bg-indigo-50 plasmo-rounded-md plasmo-transition-colors"
               >
                 Eye Track
               </Link>
               <Link 
+                to="/sdk" 
+                className="plasmo-px-2 plasmo-py-1.5 plasmo-text-xs plasmo-font-medium plasmo-text-gray-700 hover:plasmo-text-indigo-600 hover:plasmo-bg-indigo-50 plasmo-rounded-md plasmo-transition-colors"
+              >
+                SDK
+              </Link>
+              <Link 
                 to="/settings" 
-                className="plasmo-px-3 plasmo-py-1.5 plasmo-text-sm plasmo-font-medium plasmo-text-gray-700 hover:plasmo-text-indigo-600 hover:plasmo-bg-indigo-50 plasmo-rounded-md plasmo-transition-colors"
+                className="plasmo-px-2 plasmo-py-1.5 plasmo-text-xs plasmo-font-medium plasmo-text-gray-700 hover:plasmo-text-indigo-600 hover:plasmo-bg-indigo-50 plasmo-rounded-md plasmo-transition-colors"
               >
                 Settings
               </Link>

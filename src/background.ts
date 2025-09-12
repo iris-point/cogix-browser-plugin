@@ -1,7 +1,11 @@
 import { debugLog } from './utils/debug'
+import { EyeTrackerManager } from './lib/eye-tracker-manager'
 
 // Log when background script starts
 debugLog('BACKGROUND', 'Background script initialized');
+
+// Initialize persistent eye tracker
+const eyeTrackerManager = EyeTrackerManager.getInstance()
 
 // Listen for extension installation
 chrome.runtime.onInstalled.addListener((details) => {
@@ -195,6 +199,77 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         debugLog('BACKGROUND', 'Screen capture response', { streamId: !!streamId });
         sendResponse({ streamId: streamId || null });
       });
+      return true;
+      
+    case 'EYE_TRACKER_CONNECT':
+      // Connect to eye tracker
+      debugLog('BACKGROUND', 'Connecting to eye tracker');
+      eyeTrackerManager.connect()
+        .then(() => {
+          debugLog('BACKGROUND', 'Eye tracker connected successfully');
+          sendResponse({ success: true });
+        })
+        .catch((error) => {
+          debugLog('BACKGROUND', 'Eye tracker connection failed', { error: error.message });
+          sendResponse({ success: false, error: error.message });
+        });
+      return true;
+      
+    case 'EYE_TRACKER_DISCONNECT':
+      // Disconnect eye tracker
+      debugLog('BACKGROUND', 'Disconnecting eye tracker');
+      eyeTrackerManager.disconnect();
+      sendResponse({ success: true });
+      return true;
+      
+    case 'EYE_TRACKER_STATUS':
+      // Get eye tracker status and also save to storage for popup sync
+      const status = eyeTrackerManager.getStatus()
+      const isConnected = eyeTrackerManager.isTrackerConnected()
+      
+      // Save to storage for popup to read
+      chrome.storage.local.set({
+        eyeTrackerStatus: status,
+        eyeTrackerConnected: isConnected,
+        eyeTrackerLastUpdate: Date.now()
+      })
+      
+      sendResponse({
+        status: status,
+        isConnected: isConnected
+      });
+      return true;
+      
+    case 'EYE_TRACKER_SET_URL':
+      // Set WebSocket URL
+      const { url } = request;
+      eyeTrackerManager.setWsUrl(url);
+      debugLog('BACKGROUND', 'Eye tracker URL updated', { url });
+      sendResponse({ success: true });
+      return true;
+      
+    case 'GET_CAMERA_FRAME':
+      // Get latest camera frame for popup
+      const latestFrame = eyeTrackerManager.getLatestCameraFrame();
+      sendResponse({ frame: latestFrame });
+      return true;
+      
+    case 'START_EYE_TRACKER_CALIBRATION':
+      // Start calibration
+      debugLog('BACKGROUND', 'Starting eye tracker calibration');
+      try {
+        eyeTrackerManager.startCalibration();
+        sendResponse({ success: true });
+      } catch (error: any) {
+        debugLog('BACKGROUND', 'Failed to start calibration', { error: error.message });
+        sendResponse({ success: false, error: error.message });
+      }
+      return true;
+      
+    case 'STOP_EYE_TRACKER_CALIBRATION':
+      // Stop calibration (handled by content script UI)
+      debugLog('BACKGROUND', 'Calibration stopped');
+      sendResponse({ success: true });
       return true;
       
     default:
