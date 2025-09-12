@@ -129,15 +129,23 @@ export const HomePage = () => {
           </div>
         )}
 
-        {/* Quick Stats */}
-        <div className="plasmo-grid plasmo-grid-cols-2 plasmo-gap-3 plasmo-mb-6">
-          <div className="plasmo-bg-white plasmo-border plasmo-border-gray-200 plasmo-rounded-lg plasmo-p-3">
-            <div className="plasmo-text-2xl plasmo-font-bold plasmo-text-gray-900">0</div>
-            <div className="plasmo-text-xs plasmo-text-gray-500">Sessions Today</div>
-          </div>
-          <div className="plasmo-bg-white plasmo-border plasmo-border-gray-200 plasmo-rounded-lg plasmo-p-3">
-            <div className="plasmo-text-2xl plasmo-font-bold plasmo-text-gray-900">0h</div>
-            <div className="plasmo-text-xs plasmo-text-gray-500">Total Time</div>
+
+        {/* Recording Info */}
+        <div className="plasmo-mb-4">
+          <div className="plasmo-bg-indigo-50 plasmo-border plasmo-border-indigo-200 plasmo-rounded-lg plasmo-p-4">
+            <div className="plasmo-flex plasmo-items-start plasmo-gap-3">
+              <div className="plasmo-w-8 plasmo-h-8 plasmo-bg-indigo-100 plasmo-rounded-full plasmo-flex plasmo-items-center plasmo-justify-center plasmo-flex-shrink-0">
+                <svg className="plasmo-w-5 plasmo-h-5 plasmo-text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+              <div>
+                <p className="plasmo-text-sm plasmo-font-medium plasmo-text-indigo-900">Recording Controls</p>
+                <p className="plasmo-text-xs plasmo-text-indigo-700 plasmo-mt-1">
+                  Look for the recording button at the bottom-left corner of any webpage to start recording.
+                </p>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -146,40 +154,11 @@ export const HomePage = () => {
           <h3 className="plasmo-text-sm plasmo-font-medium plasmo-text-gray-700 plasmo-mb-2">Recent Sessions</h3>
           <div className="plasmo-bg-gray-50 plasmo-rounded-lg plasmo-p-4 plasmo-text-center">
             <p className="plasmo-text-sm plasmo-text-gray-500">No sessions yet</p>
-            <p className="plasmo-text-xs plasmo-text-gray-400 plasmo-mt-1">Start recording to see your sessions here</p>
+            <p className="plasmo-text-xs plasmo-text-gray-400 plasmo-mt-1">Use the overlay button on any webpage to start recording</p>
           </div>
         </div>
       </div>
 
-      {/* Floating Record Button Overlay (Loom-style) */}
-      <div className="plasmo-absolute plasmo-bottom-6 plasmo-left-1/2 plasmo-transform plasmo--translate-x-1/2">
-        <button
-          onClick={toggleRecording}
-          className={`plasmo-group plasmo-relative plasmo-w-16 plasmo-h-16 plasmo-rounded-full plasmo-shadow-xl plasmo-transition-all plasmo-duration-200 plasmo-transform hover:plasmo-scale-110 ${
-            isRecording 
-              ? 'plasmo-bg-red-500 hover:plasmo-bg-red-600'
-              : 'plasmo-bg-gradient-to-br plasmo-from-indigo-500 plasmo-to-purple-600 hover:plasmo-from-indigo-600 hover:plasmo-to-purple-700'
-          }`}
-        >
-          {/* Button Icon */}
-          <div className="plasmo-absolute plasmo-inset-0 plasmo-flex plasmo-items-center plasmo-justify-center">
-            {isRecording ? (
-              // Stop icon
-              <div className="plasmo-w-5 plasmo-h-5 plasmo-bg-white plasmo-rounded-sm"></div>
-            ) : (
-              // Record icon
-              <div className="plasmo-w-6 plasmo-h-6 plasmo-bg-white plasmo-rounded-full"></div>
-            )}
-          </div>
-          
-          {/* Hover tooltip */}
-          <div className="plasmo-absolute plasmo-bottom-full plasmo-left-1/2 plasmo-transform plasmo--translate-x-1/2 plasmo-mb-2 plasmo-opacity-0 group-hover:plasmo-opacity-100 plasmo-transition-opacity plasmo-pointer-events-none">
-            <div className="plasmo-bg-gray-900 plasmo-text-white plasmo-text-xs plasmo-py-1 plasmo-px-2 plasmo-rounded plasmo-whitespace-nowrap">
-              {isRecording ? 'Stop Recording' : 'Start Recording'}
-            </div>
-          </div>
-        </button>
-      </div>
     </div>
   )
 }

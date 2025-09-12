@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useAuth, useUser } from '@clerk/chrome-extension'
 import { getDebugLogs, clearDebugLogs, debugLog } from '../../utils/debug'
+import { Link } from 'react-router-dom'
 
 export const DebugPage = () => {
   const { isLoaded: authLoaded, userId, sessionId, getToken } = useAuth()
@@ -58,6 +59,27 @@ export const DebugPage = () => {
     });
   };
 
+  const handleSyncToken = async () => {
+    try {
+      debugLog('DEBUG_PAGE', 'Syncing token to storage');
+      const token = await getToken();
+      
+      if (token) {
+        await chrome.storage.sync.set({ clerkToken: token });
+        await chrome.storage.local.set({ clerkToken: token });
+        debugLog('DEBUG_PAGE', 'Token synced to storage', { tokenLength: token.length });
+        
+        // Refresh debug info
+        loadDebugInfo();
+        getAuthToken();
+      } else {
+        debugLog('DEBUG_PAGE', 'No token to sync');
+      }
+    } catch (error) {
+      debugLog('DEBUG_PAGE', 'Token sync failed', error);
+    }
+  };
+
   return (
     <div className="plasmo-p-4 plasmo-space-y-4 plasmo-h-[500px] plasmo-overflow-y-auto">
       <h2 className="plasmo-text-lg plasmo-font-bold">Debug Information</h2>
@@ -86,7 +108,7 @@ export const DebugPage = () => {
       </div>
       
       {/* Actions */}
-      <div className="plasmo-flex plasmo-gap-2">
+      <div className="plasmo-flex plasmo-gap-2 plasmo-flex-wrap">
         <button
           onClick={handleTestAuth}
           className="plasmo-px-3 plasmo-py-1 plasmo-bg-blue-500 plasmo-text-white plasmo-rounded plasmo-text-sm"
@@ -100,11 +122,23 @@ export const DebugPage = () => {
           Refresh
         </button>
         <button
+          onClick={handleSyncToken}
+          className="plasmo-px-3 plasmo-py-1 plasmo-bg-purple-500 plasmo-text-white plasmo-rounded plasmo-text-sm"
+        >
+          Sync Token
+        </button>
+        <button
           onClick={handleClearLogs}
           className="plasmo-px-3 plasmo-py-1 plasmo-bg-red-500 plasmo-text-white plasmo-rounded plasmo-text-sm"
         >
           Clear Logs
         </button>
+        <Link
+          to="/test-connection"
+          className="plasmo-px-3 plasmo-py-1 plasmo-bg-orange-500 plasmo-text-white plasmo-rounded plasmo-text-sm plasmo-inline-block"
+        >
+          Test Connection
+        </Link>
       </div>
       
       {/* Debug Logs */}

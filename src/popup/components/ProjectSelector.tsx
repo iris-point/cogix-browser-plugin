@@ -30,6 +30,12 @@ export const ProjectSelector = ({ onProjectSelected }: ProjectSelectorProps) => 
       // Try to get token from Clerk first
       let token = await getToken()
       
+      // Save token to storage for content script access
+      if (token) {
+        await chrome.storage.sync.set({ clerkToken: token })
+        console.log('Token saved to storage for content script')
+      }
+      
       // Fallback to stored token if Clerk doesn't have it
       if (!token) {
         console.log('No token from Clerk, checking storage...')

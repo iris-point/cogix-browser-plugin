@@ -5,6 +5,8 @@ import { SignInPage } from './popup/pages/sign-in'
 import { SignUpPage } from './popup/pages/sign-up'
 import { SettingsPage } from './popup/pages/settings'
 import { DebugPage } from './popup/pages/debug'
+import { EyeTrackingPage } from './popup/pages/eye-tracking'
+import { TestConnectionPage } from './popup/pages/test-connection'
 import "~style.css"
 
 function IndexPopup() {
@@ -15,8 +17,10 @@ function IndexPopup() {
           <Route index element={<HomePage />} />
           <Route path="sign-in" element={<SignInPage />} />
           <Route path="sign-up" element={<SignUpPage />} />
+          <Route path="eye-tracking" element={<EyeTrackingPage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="debug" element={<DebugPage />} />
+          <Route path="test-connection" element={<TestConnectionPage />} />
         </Route>
       </Routes>
     </MemoryRouter>

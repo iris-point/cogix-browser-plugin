@@ -5,15 +5,15 @@
   "description": "Eye tracking, screen recording, and event capture for research",
   "author": "Cogix",
   "scripts": {
-    "dev": "plasmo dev",
-    "build": "plasmo build",
-    "package": "plasmo package",
+    "dev": "set NODE_NO_WARNINGS=1 && plasmo dev",
+    "build": "set NODE_NO_WARNINGS=1 && plasmo build",
+    "package": "set NODE_NO_WARNINGS=1 && plasmo package",
     "package:crx": "powershell -ExecutionPolicy Bypass -File create-crx.ps1",
     "package:all": "npm run build && npm run package && npm run package:crx"
   },
   "dependencies": {
     "@clerk/chrome-extension": "^2.5.31",
-    "@iris-point/eye-tracking-core": "file:../..",
+    "@iris-point/eye-tracking-core": "^1.0.9",
     "@plasmohq/storage": "^1.13.0",
     "react": "18.2.0",
     "react-dom": "18.2.0",
@@ -38,7 +38,8 @@
       "storage",
       "tabs",
       "activeTab",
-      "scripting"
+      "scripting",
+      "desktopCapture"
     ],
     "host_permissions": [
       "$PLASMO_PUBLIC_CLERK_SYNC_HOST/*",

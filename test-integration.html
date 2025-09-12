@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cogix Browser Plugin Integration Test</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            border-radius: 12px;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .section {
+            background: #f8f9fa;
+            padding: 25px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border-left: 4px solid #667eea;
+        }
+        
+        .test-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin: 20px 0;
+        }
+        
+        .test-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            border: 1px solid #e5e7eb;
+        }
+        
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        
+        .status-connected { background: #10b981; }
+        .status-disconnected { background: #ef4444; }
+        .status-unknown { background: #6b7280; }
+        
+        button {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            margin: 5px;
+        }
+        
+        button:hover {
+            background: #5a67d8;
+        }
+        
+        button:disabled {
+            background: #9ca3af;
+            cursor: not-allowed;
+        }
+        
+        .log {
+            background: #1f2937;
+            color: #f3f4f6;
+            padding: 15px;
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            max-height: 200px;
+            overflow-y: auto;
+            margin-top: 15px;
+        }
+        
+        .image-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+            margin: 20px 0;
+        }
+        
+        .test-image {
+            width: 100%;
+            height: 150px;
+            object-fit: cover;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        
+        .test-image:hover {
+            transform: scale(1.05);
+        }
+        
+        .instructions {
+            background: #fef3c7;
+            border: 1px solid #f59e0b;
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+        }
+        
+        .instructions h3 {
+            color: #92400e;
+            margin-top: 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🎯 Cogix Browser Plugin Integration Test</h1>
+        <p>Test the complete eye tracking and screen recording functionality</p>
+    </div>
+
+    <div class="instructions">
+        <h3>📋 Test Instructions</h3>
+        <ol>
+            <li><strong>Install the Extension:</strong> Make sure the Cogix browser plugin is installed and enabled</li>
+            <li><strong>Start Eye Tracking SDK:</strong> Ensure the eye tracking hardware and SDK are running</li>
+            <li><strong>Connect:</strong> Use the extension popup to connect to the eye tracker</li>
+            <li><strong>Calibrate:</strong> Complete the calibration process</li>
+            <li><strong>Select Project:</strong> Choose a project from the extension popup</li>
+            <li><strong>Start Recording:</strong> Click the record button in the overlay (bottom-left)</li>
+            <li><strong>Look Around:</strong> Move your eyes around the page and interact with elements</li>
+            <li><strong>Stop Recording:</strong> Click the record button again to stop</li>
+        </ol>
+    </div>
+
+    <div class="section">
+        <h2>🔌 Extension Status</h2>
+        <div class="test-grid">
+            <div class="test-card">
+                <h3>Extension Detection</h3>
+                <p id="extension-status">
+                    <span class="status-indicator status-unknown"></span>
+                    Checking extension...
+                </p>
+                <button onclick="checkExtension()">Refresh Status</button>
+            </div>
+            
+            <div class="test-card">
+                <h3>Eye Tracker Connection</h3>
+                <p id="eyetracker-status">
+                    <span class="status-indicator status-unknown"></span>
+                    Unknown
+                </p>
+                <button onclick="testEyeTracker()">Test Connection</button>
+            </div>
+            
+            <div class="test-card">
+                <h3>Recording Status</h3>
+                <p id="recording-status">
+                    <span class="status-indicator status-disconnected"></span>
+                    Not Recording
+                </p>
+                <button onclick="checkRecording()">Check Status</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>👁️ Eye Tracking Test Content</h2>
+        <p>Look at different elements on this page to test gaze tracking. The red dot should follow your gaze when recording is active.</p>
+        
+        <div class="test-grid">
+            <div class="test-card">
+                <h3>Text Reading Test</h3>
+                <p>This is a paragraph of text that you can read to test eye tracking accuracy. 
+                The system should capture your reading patterns and saccadic movements as you 
+                process this information. Try reading at different speeds.</p>
+            </div>
+            
+            <div class="test-card">
+                <h3>Interactive Elements</h3>
+                <button onclick="buttonClick(1)">Button 1</button>
+                <button onclick="buttonClick(2)">Button 2</button>
+                <button onclick="buttonClick(3)">Button 3</button>
+                <p>Click these buttons to test fixation on interactive elements.</p>
+            </div>
+            
+            <div class="test-card">
+                <h3>Visual Search</h3>
+                <div style="display: grid; grid-template-columns: repeat(6, 1fr); gap: 5px;">
+                    <div style="background: #ef4444; width: 30px; height: 30px; border-radius: 4px;"></div>
+                    <div style="background: #10b981; width: 30px; height: 30px; border-radius: 4px;"></div>
+                    <div style="background: #3b82f6; width: 30px; height: 30px; border-radius: 4px;"></div>
+                    <div style="background: #f59e0b; width: 30px; height: 30px; border-radius: 4px;"></div>
+                    <div style="background: #8b5cf6; width: 30px; height: 30px; border-radius: 4px;"></div>
+                    <div style="background: #06b6d4; width: 30px; height: 30px; border-radius: 4px;"></div>
+                </div>
+                <p>Find the blue square among these colored elements.</p>
+            </div>
+            
+            <div class="test-card">
+                <h3>Scrolling Content</h3>
+                <div style="height: 100px; overflow-y: scroll; padding: 10px; background: #f3f4f6;">
+                    <p>This is scrollable content that you can scroll through to test eye tracking during scrolling actions.</p>
+                    <p>Line 2 of scrollable content.</p>
+                    <p>Line 3 of scrollable content.</p>
+                    <p>Line 4 of scrollable content.</p>
+                    <p>Line 5 of scrollable content.</p>
+                    <p>Line 6 of scrollable content.</p>
+                    <p>Line 7 of scrollable content.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>📊 Test Results</h2>
+        <div class="test-card">
+            <h3>Console Output</h3>
+            <p>Check the browser console (F12) for detailed logging information.</p>
+            <div class="log" id="console-log">
+                Test logs will appear here...
+            </div>
+            <button onclick="clearLog()">Clear Log</button>
+        </div>
+    </div>
+
+    <script>
+        let logMessages = [];
+
+        function log(message) {
+            const timestamp = new Date().toISOString().split('T')[1].split('.')[0];
+            const logMessage = `[${timestamp}] ${message}`;
+            logMessages.push(logMessage);
+            
+            const logElement = document.getElementById('console-log');
+            logElement.textContent = logMessages.slice(-20).join('\n'); // Show last 20 messages
+            logElement.scrollTop = logElement.scrollHeight;
+            
+            console.log(`[Test Page] ${message}`);
+        }
+
+        function clearLog() {
+            logMessages = [];
+            document.getElementById('console-log').textContent = 'Test logs will appear here...';
+        }
+
+        function updateStatus(elementId, status, text) {
+            const element = document.getElementById(elementId);
+            const indicator = element.querySelector('.status-indicator');
+            
+            indicator.className = `status-indicator status-${status}`;
+            element.innerHTML = `<span class="status-indicator status-${status}"></span>${text}`;
+        }
+
+        function checkExtension() {
+            log('Checking extension status...');
+            
+            if (typeof chrome !== 'undefined' && chrome.runtime) {
+                try {
+                    // Check if we can access extension APIs
+                    chrome.runtime.sendMessage({ type: 'PING' }, (response) => {
+                        if (chrome.runtime.lastError) {
+                            updateStatus('extension-status', 'disconnected', 'Extension not responding');
+                            log('Extension not responding: ' + chrome.runtime.lastError.message);
+                        } else {
+                            updateStatus('extension-status', 'connected', 'Extension active');
+                            log('Extension is active and responding');
+                        }
+                    });
+                } catch (error) {
+                    updateStatus('extension-status', 'disconnected', 'Extension error');
+                    log('Extension error: ' + error.message);
+                }
+            } else {
+                updateStatus('extension-status', 'disconnected', 'Extension not detected');
+                log('Chrome extension APIs not available');
+            }
+        }
+
+        function testEyeTracker() {
+            log('Testing eye tracker connection...');
+            // This would normally check the extension's eye tracker status
+            // For now, we'll just show that we're testing
+            updateStatus('eyetracker-status', 'unknown', 'Testing connection...');
+            
+            setTimeout(() => {
+                // Simulate test result
+                updateStatus('eyetracker-status', 'connected', 'Connected (simulated)');
+                log('Eye tracker test completed');
+            }, 2000);
+        }
+
+        function checkRecording() {
+            log('Checking recording status...');
+            
+            // Check if recording indicator is visible
+            const recordingIndicator = document.getElementById('cogix-recording-indicator');
+            if (recordingIndicator) {
+                updateStatus('recording-status', 'connected', 'Recording Active');
+                log('Recording is currently active');
+            } else {
+                updateStatus('recording-status', 'disconnected', 'Not Recording');
+                log('Recording is not active');
+            }
+        }
+
+        function buttonClick(buttonNum) {
+            log(`Button ${buttonNum} clicked`);
+        }
+
+        // Initialize page
+        document.addEventListener('DOMContentLoaded', () => {
+            log('Test page loaded');
+            checkExtension();
+            
+            // Periodically check recording status
+            setInterval(checkRecording, 3000);
+        });
+
+        // Listen for gaze data if extension is sending it
+        if (typeof chrome !== 'undefined' && chrome.runtime) {
+            chrome.runtime.onMessage?.addListener((message, sender, sendResponse) => {
+                if (message.type === 'GAZE_DATA') {
+                    log(`Gaze data received: x=${message.data.x.toFixed(2)}, y=${message.data.y.toFixed(2)}`);
+                }
+            });
+        }
+    </script>
+</body>
+</html>

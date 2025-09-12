@@ -141,6 +141,62 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       });
       return true;
       
+    case 'OPEN_POPUP':
+      // Open the extension popup
+      chrome.action.openPopup().catch(() => {
+        // If openPopup fails (not supported), open in a new window
+        chrome.windows.create({
+          url: chrome.runtime.getURL('popup.html'),
+          type: 'popup',
+          width: 400,
+          height: 640
+        });
+      });
+      sendResponse({ success: true });
+      return true;
+      
+    case 'TOGGLE_RECORDING':
+      // Handle recording toggle from content script
+      const { isRecording, projectId } = request;
+      debugLog('BACKGROUND', 'Toggle recording', { isRecording, projectId });
+      
+      if (isRecording) {
+        // Start recording - forward to active tab
+        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+          if (tabs[0]?.id) {
+            chrome.tabs.sendMessage(tabs[0].id, {
+              type: 'START_RECORDING',
+              projectId: projectId
+            }).catch((error) => {
+              debugLog('BACKGROUND', 'Failed to start recording', { error: error.message });
+            });
+          }
+        });
+      } else {
+        // Stop recording - forward to active tab
+        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+          if (tabs[0]?.id) {
+            chrome.tabs.sendMessage(tabs[0].id, {
+              type: 'STOP_RECORDING'
+            }).catch((error) => {
+              debugLog('BACKGROUND', 'Failed to stop recording', { error: error.message });
+            });
+          }
+        });
+      }
+      
+      sendResponse({ success: true });
+      return true;
+      
+    case 'REQUEST_SCREEN_CAPTURE':
+      // Handle screen capture request
+      const { sources } = request;
+      chrome.desktopCapture.chooseDesktopMedia(sources || ['screen', 'window', 'tab'], (streamId) => {
+        debugLog('BACKGROUND', 'Screen capture response', { streamId: !!streamId });
+        sendResponse({ streamId: streamId || null });
+      });
+      return true;
+      
     default:
       debugLog('BACKGROUND', 'Unknown message type', { type: request.type });
   }
