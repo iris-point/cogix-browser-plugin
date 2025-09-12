@@ -1,0 +1,69 @@
+name: "Build Extension"
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          
+      - name: Install dependencies
+        run: npm ci
+        
+      - name: Build extension
+        run: npm run build
+        env:
+          NODE_NO_WARNINGS: 1
+          
+      - name: Package extension
+        run: npm run package
+        env:
+          NODE_NO_WARNINGS: 1
+          
+      - name: Get version and commit info
+        id: info
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          COMMIT_SHORT=$(echo "${{ github.sha }}" | cut -c1-8)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "commit=$COMMIT_SHORT" >> $GITHUB_OUTPUT
+          
+      - name: Rename build artifact
+        run: |
+          mv build/chrome-mv3-prod.zip build/cogix-browser-plugin-chrome-${{ steps.info.outputs.version }}-${{ steps.info.outputs.commit }}.zip
+          
+      - name: Verify build
+        run: |
+          echo "Build verification:"
+          ls -la build/
+          echo "Extension contents:"
+          unzip -l build/cogix-browser-plugin-chrome-${{ steps.info.outputs.version }}-${{ steps.info.outputs.commit }}.zip | head -20
+          
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cogix-browser-plugin-chrome-build-${{ steps.info.outputs.commit }}
+          path: build/cogix-browser-plugin-chrome-${{ steps.info.outputs.version }}-${{ steps.info.outputs.commit }}.zip
+          retention-days: 30
+          
+      - name: Build summary
+        run: |
+          echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch**: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version**: ${{ steps.info.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit**: ${{ steps.info.outputs.commit }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status**: ✅ Build successful" >> $GITHUB_STEP_SUMMARY
+          echo "- **Artifact**: cogix-browser-plugin-chrome-${{ steps.info.outputs.version }}-${{ steps.info.outputs.commit }}.zip" >> $GITHUB_STEP_SUMMARY

@@ -9,7 +9,11 @@
     "build": "set NODE_NO_WARNINGS=1 && plasmo build",
     "package": "set NODE_NO_WARNINGS=1 && plasmo package",
     "package:crx": "powershell -ExecutionPolicy Bypass -File create-crx.ps1",
-    "package:all": "npm run build && npm run package && npm run package:crx"
+    "package:all": "npm run build && npm run package && npm run package:crx",
+    "release": "node scripts/release.js",
+    "release:patch": "node scripts/release.js patch",
+    "release:minor": "node scripts/release.js minor",
+    "release:major": "node scripts/release.js major"
   },
   "dependencies": {
     "@clerk/chrome-extension": "^2.5.31",
