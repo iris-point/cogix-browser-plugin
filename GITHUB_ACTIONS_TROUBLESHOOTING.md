@@ -140,11 +140,10 @@ git push origin v1.0.1
 ```bash
 # Test build locally
 npm install
-npm run build
-npm run package
+npm run build  # This automatically creates the zip file
 
 # Verify output
-ls -la build/
+ls -la build/  # Should show chrome-mv3-prod.zip
 ```
 
 ### 4. Check File Permissions

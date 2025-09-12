@@ -103,15 +103,10 @@ function main() {
       updateVersion(newVersion);
       console.log('✓ Updated package.json');
       
-      // Build the extension
+      // Build the extension (this also creates the zip file)
       console.log('Building extension...');
       run('npm run build');
-      console.log('✓ Extension built successfully');
-      
-      // Package the extension
-      console.log('Packaging extension...');
-      run('npm run package');
-      console.log('✓ Extension packaged successfully');
+      console.log('✓ Extension built and packaged successfully');
       
       // Git operations
       console.log('Committing changes...');

@@ -31,11 +31,6 @@ jobs:
         env:
           NODE_NO_WARNINGS: 1
           
-      - name: Package extension
-        run: npm run package
-        env:
-          NODE_NO_WARNINGS: 1
-          
       - name: Get version and commit info
         id: info
         run: |

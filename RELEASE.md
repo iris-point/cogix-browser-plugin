@@ -163,5 +163,5 @@ Follow [Semantic Versioning](https://semver.org/):
 For issues with the release process:
 1. Check the [GitHub Actions Troubleshooting Guide](./GITHUB_ACTIONS_TROUBLESHOOTING.md)
 2. Check the GitHub Actions logs
-3. Verify local build works: `npm run build && npm run package`
+3. Verify local build works: `npm run build` (this creates the zip file automatically)
 4. Create an issue in the repository with build logs

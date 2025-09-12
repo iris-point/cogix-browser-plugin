@@ -33,11 +33,6 @@ jobs:
         env:
           NODE_NO_WARNINGS: 1
           
-      - name: Package extension
-        run: npm run package
-        env:
-          NODE_NO_WARNINGS: 1
-          
       - name: Get version from package.json
         id: package-version
         run: |
