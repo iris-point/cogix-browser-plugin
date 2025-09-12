@@ -17,8 +17,7 @@ This guide helps resolve common issues with the Cogix Browser Plugin GitHub Acti
 **Solution:** ✅ **FIXED** - The workflow now includes the required permissions:
 ```yaml
 permissions:
-  contents: write
-  releases: write
+  contents: write  # This covers both repository access and release creation
 ```
 
 **Additional Steps:**
@@ -196,8 +195,7 @@ If issues persist:
 ## Required Permissions Summary
 
 **Release Workflow:**
-- `contents: write` - Create releases and tags
-- `releases: write` - Publish releases
+- `contents: write` - Create releases, tags, and publish releases
 
 **Build Workflow:**
 - `contents: read` - Read repository content

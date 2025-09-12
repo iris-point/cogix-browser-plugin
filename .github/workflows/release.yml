@@ -13,7 +13,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      releases: write
     
     steps:
       - name: Checkout code
@@ -77,8 +76,36 @@ jobs:
         run: |
           echo "Build directory contents:"
           ls -la build/
+          echo "Final zip file check:"
+          ls -la build/cogix-browser-plugin-chrome-v${{ steps.package-version.outputs.version }}.zip || echo "Final zip file not found!"
           echo "Extension files:"
-          unzip -l build/cogix-browser-plugin-chrome-v${{ steps.package-version.outputs.version }}.zip
+          if [ -f "build/cogix-browser-plugin-chrome-v${{ steps.package-version.outputs.version }}.zip" ]; then
+            unzip -l build/cogix-browser-plugin-chrome-v${{ steps.package-version.outputs.version }}.zip
+            echo "Zip file size:"
+            du -h build/cogix-browser-plugin-chrome-v${{ steps.package-version.outputs.version }}.zip
+          else
+            echo "Cannot list zip contents - file not found"
+          fi
+          
+      - name: Ensure zip file exists for release
+        run: |
+          ZIP_FILE="build/cogix-browser-plugin-chrome-v${{ steps.package-version.outputs.version }}.zip"
+          if [ ! -f "$ZIP_FILE" ]; then
+            echo "ERROR: Zip file not found at $ZIP_FILE"
+            echo "Available files in build directory:"
+            ls -la build/
+            echo "Creating zip file as last resort..."
+            if [ -d "build/chrome-mv3-prod" ]; then
+              cd build/chrome-mv3-prod && zip -r "../cogix-browser-plugin-chrome-v${{ steps.package-version.outputs.version }}.zip" .
+              cd ../..
+              echo "Zip file created successfully"
+            else
+              echo "ERROR: No build directory found!"
+              exit 1
+            fi
+          else
+            echo "Zip file exists: $ZIP_FILE"
+          fi
           
       - name: Create Release (if triggered by tag)
         if: startsWith(github.ref, 'refs/tags/')
@@ -120,6 +147,14 @@ jobs:
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: Verify release was created
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          echo "Release creation completed"
+          echo "Checking if zip file still exists:"
+          ls -la build/cogix-browser-plugin-chrome-v${{ steps.package-version.outputs.version }}.zip || echo "Zip file not found after release"
+          echo "GitHub release should now contain the extension file"
           
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
