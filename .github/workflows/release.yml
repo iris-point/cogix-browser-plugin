@@ -53,22 +53,29 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Extension version: $VERSION"
           
-      - name: Rename zip file with version
+      - name: Rename zip file with version and create latest
         run: |
           # First try the expected location
           if [ -f "build/chrome-mv3-prod.zip" ]; then
             echo "Found zip file at build/chrome-mv3-prod.zip"
-            mv build/chrome-mv3-prod.zip build/cogix-browser-plugin-chrome-v${{ steps.package-version.outputs.version }}.zip
+            # Create versioned file
+            cp build/chrome-mv3-prod.zip build/cogix-browser-plugin-chrome-v${{ steps.package-version.outputs.version }}.zip
+            # Create latest file (permanent URL)
+            mv build/chrome-mv3-prod.zip build/cogix-browser-plugin-latest.zip
           else
             echo "Looking for zip files in alternative locations..."
             # Look for any zip file in build directory
             ZIP_FILE=$(find build -name "*.zip" -type f | head -1)
             if [ -n "$ZIP_FILE" ]; then
               echo "Found zip file at: $ZIP_FILE"
-              mv "$ZIP_FILE" build/cogix-browser-plugin-chrome-v${{ steps.package-version.outputs.version }}.zip
+              # Create versioned file
+              cp "$ZIP_FILE" build/cogix-browser-plugin-chrome-v${{ steps.package-version.outputs.version }}.zip
+              # Create latest file (permanent URL)
+              mv "$ZIP_FILE" build/cogix-browser-plugin-latest.zip
             else
               echo "No zip file found! Creating one manually..."
               cd build/chrome-mv3-prod && zip -r ../cogix-browser-plugin-chrome-v${{ steps.package-version.outputs.version }}.zip .
+              cd build/chrome-mv3-prod && zip -r ../cogix-browser-plugin-latest.zip .
             fi
           fi
           
@@ -113,6 +120,7 @@ jobs:
         with:
           files: |
             build/cogix-browser-plugin-chrome-v${{ steps.package-version.outputs.version }}.zip
+            build/cogix-browser-plugin-latest.zip
           name: "Cogix Browser Plugin Chrome v${{ steps.package-version.outputs.version }}"
           body: |
             ## Cogix Browser Plugin Chrome v${{ steps.package-version.outputs.version }}
