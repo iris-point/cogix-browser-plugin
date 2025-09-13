@@ -8,6 +8,8 @@ export const EyeTrackingPage = () => {
   const {
     deviceStatus,
     isCalibrating,
+    isCalibrated,
+    isTracking,
     calibrationResult,
     currentGaze,
     wsUrl,
@@ -109,8 +111,10 @@ export const EyeTrackingPage = () => {
   const getStatusColor = (status: DeviceStatus) => {
     switch (status) {
       case DeviceStatus.CONNECTED:
+      case DeviceStatus.TRACKING:
         return 'plasmo-text-green-600 plasmo-bg-green-50'
       case DeviceStatus.CONNECTING:
+      case DeviceStatus.CALIBRATING:
         return 'plasmo-text-yellow-600 plasmo-bg-yellow-50'
       case DeviceStatus.DISCONNECTED:
         return 'plasmo-text-gray-600 plasmo-bg-gray-50'
@@ -125,8 +129,12 @@ export const EyeTrackingPage = () => {
     switch (status) {
       case DeviceStatus.CONNECTED:
         return 'Connected'
+      case DeviceStatus.TRACKING:
+        return 'Connected & Tracking'
       case DeviceStatus.CONNECTING:
         return 'Connecting...'
+      case DeviceStatus.CALIBRATING:
+        return 'Calibrating...'
       case DeviceStatus.DISCONNECTED:
         return 'Disconnected'
       case DeviceStatus.ERROR:
@@ -152,11 +160,47 @@ export const EyeTrackingPage = () => {
           }`}></div>
           {getStatusText(deviceStatus)}
         </div>
-        {deviceStatus === DeviceStatus.CONNECTED && (
-          <div className="plasmo-mt-2">
+        <div className="plasmo-mt-2">
+          {(deviceStatus === DeviceStatus.CONNECTED || deviceStatus === DeviceStatus.TRACKING) ? (
             <p className="plasmo-text-xs plasmo-text-gray-500 plasmo-mb-2">
-              Connected and ready for calibration. Connection persists even when popup is closed.
+              Connected and ready. Connection persists even when popup is closed.
             </p>
+          ) : (
+            <div className="plasmo-flex plasmo-items-center plasmo-gap-2 plasmo-mb-2">
+              <p className="plasmo-text-xs plasmo-text-gray-500">
+                Status sync issue detected.
+              </p>
+              <button
+                onClick={() => window.location.reload()}
+                className="plasmo-px-2 plasmo-py-1 plasmo-bg-blue-100 plasmo-text-blue-700 plasmo-rounded plasmo-text-xs hover:plasmo-bg-blue-200"
+              >
+                Refresh
+              </button>
+            </div>
+          )}
+          
+          {/* Enhanced status indicators - show regardless of connection status */}
+          <div className="plasmo-flex plasmo-flex-wrap plasmo-gap-2 plasmo-mb-2">
+            <span className={`plasmo-inline-flex plasmo-items-center plasmo-px-2 plasmo-py-1 plasmo-rounded-full plasmo-text-xs plasmo-font-medium ${
+              isCalibrated ? 'plasmo-bg-green-100 plasmo-text-green-700' : 'plasmo-bg-yellow-100 plasmo-text-yellow-700'
+            }`}>
+              <div className={`plasmo-w-1.5 plasmo-h-1.5 plasmo-rounded-full plasmo-mr-1 ${
+                isCalibrated ? 'plasmo-bg-green-500' : 'plasmo-bg-yellow-500'
+              }`}></div>
+              {isCalibrated ? 'Calibrated' : 'Not Calibrated'}
+            </span>
+            
+            <span className={`plasmo-inline-flex plasmo-items-center plasmo-px-2 plasmo-py-1 plasmo-rounded-full plasmo-text-xs plasmo-font-medium ${
+              isTracking ? 'plasmo-bg-blue-100 plasmo-text-blue-700' : 'plasmo-bg-gray-100 plasmo-text-gray-700'
+            }`}>
+              <div className={`plasmo-w-1.5 plasmo-h-1.5 plasmo-rounded-full plasmo-mr-1 ${
+                isTracking ? 'plasmo-bg-blue-500' : 'plasmo-bg-gray-500'
+              }`}></div>
+              {isTracking ? 'Tracking' : 'Not Tracking'}
+            </span>
+          </div>
+          
+          {(deviceStatus === DeviceStatus.CONNECTED || deviceStatus === DeviceStatus.TRACKING || isCalibrated || isTracking) && (
             <button
               onClick={handleDisconnect}
               className="plasmo-inline-flex plasmo-items-center plasmo-px-3 plasmo-py-1 plasmo-bg-red-100 plasmo-text-red-700 plasmo-rounded-md plasmo-text-xs plasmo-font-medium hover:plasmo-bg-red-200 plasmo-transition-colors"
@@ -166,8 +210,8 @@ export const EyeTrackingPage = () => {
               </svg>
               Force Disconnect
             </button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
       
       {/* Connection Controls */}
@@ -206,19 +250,36 @@ export const EyeTrackingPage = () => {
       {/* Calibration */}
       <div className="plasmo-mb-3 plasmo-p-3 plasmo-bg-white plasmo-rounded-lg plasmo-border plasmo-border-gray-200">
         <h3 className="plasmo-text-sm plasmo-font-semibold plasmo-mb-2">Calibration</h3>
-        {calibrationResult && (
-          <div className="plasmo-mb-2 plasmo-p-2 plasmo-bg-green-50 plasmo-border plasmo-border-green-200 plasmo-rounded plasmo-text-xs">
-            <div className="plasmo-text-green-800">
-              ✓ Calibrated (Accuracy: {calibrationResult.accuracy?.toFixed(2) || 'N/A'})
+        
+        {/* Calibration Status */}
+        {isCalibrated ? (
+          <div className="plasmo-mb-3 plasmo-p-2 plasmo-bg-green-50 plasmo-border plasmo-border-green-200 plasmo-rounded plasmo-text-sm">
+            <div className="plasmo-text-green-800 plasmo-flex plasmo-items-center">
+              <svg className="plasmo-w-4 plasmo-h-4 plasmo-mr-2" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+              </svg>
+              ✓ Calibrated and ready for recording
+              {isTracking && <span className="plasmo-ml-2 plasmo-text-blue-600">• Tracking Active</span>}
+            </div>
+          </div>
+        ) : (
+          <div className="plasmo-mb-3 plasmo-p-2 plasmo-bg-yellow-50 plasmo-border plasmo-border-yellow-200 plasmo-rounded plasmo-text-sm">
+            <div className="plasmo-text-yellow-800">
+              ⚠️ Calibration required before recording
             </div>
           </div>
         )}
+        
         <button
           onClick={handleStartCalibration}
           disabled={deviceStatus !== DeviceStatus.CONNECTED || isCalibrating}
-          className="plasmo-w-full plasmo-px-4 plasmo-py-2 plasmo-bg-purple-600 plasmo-text-white plasmo-rounded-md plasmo-text-sm plasmo-font-medium hover:plasmo-bg-purple-700 disabled:plasmo-opacity-50 disabled:plasmo-cursor-not-allowed"
+          className={`plasmo-w-full plasmo-px-4 plasmo-py-2 plasmo-text-white plasmo-rounded-md plasmo-text-sm plasmo-font-medium disabled:plasmo-opacity-50 disabled:plasmo-cursor-not-allowed ${
+            isCalibrated 
+              ? 'plasmo-bg-green-600 hover:plasmo-bg-green-700' 
+              : 'plasmo-bg-purple-600 hover:plasmo-bg-purple-700'
+          }`}
         >
-          {isCalibrating ? 'Calibrating...' : 'Start Calibration'}
+          {isCalibrating ? 'Calibrating...' : isCalibrated ? 'Recalibrate' : 'Start Calibration'}
         </button>
       </div>
       

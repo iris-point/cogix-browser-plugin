@@ -11,6 +11,8 @@ interface EyeTrackerContextType {
   // State
   deviceStatus: DeviceStatus
   isCalibrating: boolean
+  isCalibrated: boolean
+  isTracking: boolean
   calibrationResult: CalibrationResult | null
   currentGaze: GazeData | null
   wsUrl: string
@@ -35,6 +37,8 @@ export const useEyeTracker = () => {
 export const EyeTrackerProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [deviceStatus, setDeviceStatus] = useState<DeviceStatus>(DeviceStatus.DISCONNECTED)
   const [isCalibrating, setIsCalibrating] = useState(false)
+  const [isCalibrated, setIsCalibrated] = useState(false)
+  const [isTracking, setIsTracking] = useState(false)
   const [calibrationResult, setCalibrationResult] = useState<CalibrationResult | null>(null)
   const [currentGaze, setCurrentGaze] = useState<GazeData | null>(null)
   const [wsUrl, setWsUrl] = useState('wss://127.0.0.1:8443')
@@ -67,12 +71,45 @@ export const EyeTrackerProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     
     chrome.runtime.onMessage.addListener(handleMessage)
     
-    // Get initial status from storage and poll for updates
+    // Get comprehensive status from both storage and background script
     const updateStatus = () => {
-      chrome.storage.local.get(['eyeTrackerStatus', 'eyeTrackerConnected'], (result) => {
+      // First get from storage (fast)
+      chrome.storage.local.get([
+        'eyeTrackerStatus', 
+        'eyeTrackerConnected', 
+        'eyeTrackerCalibrated', 
+        'eyeTrackerTracking'
+      ], (result) => {
+        console.log('Status from storage:', result)
+        
+        // Update connection status
         if (result.eyeTrackerStatus) {
-          console.log('Status update from storage:', result)
           setDeviceStatus(result.eyeTrackerStatus)
+        } else if (result.eyeTrackerConnected) {
+          // Fallback: if we have connection info but no status, assume connected
+          setDeviceStatus(DeviceStatus.CONNECTED)
+        }
+        
+        // Update calibration and tracking status
+        if (result.eyeTrackerCalibrated !== undefined) {
+          setIsCalibrated(result.eyeTrackerCalibrated)
+        }
+        if (result.eyeTrackerTracking !== undefined) {
+          setIsTracking(result.eyeTrackerTracking)
+        }
+      })
+      
+      // Also request fresh status from background script
+      chrome.runtime.sendMessage({ type: 'EYE_TRACKER_STATUS' }, (response) => {
+        if (response) {
+          console.log('Fresh status from background:', response)
+          setDeviceStatus(response.status)
+          if (response.isCalibrated !== undefined) {
+            setIsCalibrated(response.isCalibrated)
+          }
+          if (response.isTracking !== undefined) {
+            setIsTracking(response.isTracking)
+          }
         }
       })
     }
@@ -89,13 +126,63 @@ export const EyeTrackerProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       })
     }
     
-    // Get status immediately and start camera polling if connected
-    updateStatus()
-    chrome.storage.local.get(['eyeTrackerStatus'], (result) => {
-      if (result.eyeTrackerStatus === DeviceStatus.CONNECTED) {
-        startCameraPolling()
-      }
-    })
+    // Get status immediately with multiple attempts for reliability
+    const initializeStatus = async () => {
+      // Attempt 1: Get from storage
+      updateStatus()
+      
+      // Attempt 2: Wait a bit and try background script directly
+      setTimeout(() => {
+        chrome.runtime.sendMessage({ type: 'EYE_TRACKER_STATUS' }, (response) => {
+          if (response) {
+            console.log('Delayed status from background:', response)
+            setDeviceStatus(response.status)
+            if (response.isCalibrated !== undefined) {
+              setIsCalibrated(response.isCalibrated)
+            }
+            if (response.isTracking !== undefined) {
+              setIsTracking(response.isTracking)
+            }
+            
+            // Start camera polling if connected
+            if (response.status === DeviceStatus.CONNECTED) {
+              startCameraPolling()
+            }
+          } else {
+            console.warn('No response from background script - checking storage again')
+            // Fallback: Check storage again if background doesn't respond
+            chrome.storage.local.get(['eyeTrackerConnected', 'eyeTrackerCalibrated'], (result) => {
+              if (result.eyeTrackerConnected) {
+                console.log('Fallback: Setting connected status from storage')
+                setDeviceStatus(DeviceStatus.CONNECTED)
+                startCameraPolling()
+              }
+              if (result.eyeTrackerCalibrated) {
+                setIsCalibrated(true)
+              }
+            })
+          }
+        })
+      }, 500) // Wait 500ms for background to be ready
+      
+      // Attempt 3: Another try after 1 second
+      setTimeout(() => {
+        chrome.runtime.sendMessage({ type: 'EYE_TRACKER_STATUS' }, (response) => {
+          if (response) {
+            console.log('Final status check from background:', response)
+            setDeviceStatus(response.status)
+            if (response.isCalibrated !== undefined) {
+              setIsCalibrated(response.isCalibrated)
+            }
+            if (response.isTracking !== undefined) {
+              setIsTracking(response.isTracking)
+            }
+          }
+        })
+      }, 1000)
+    }
+    
+    initializeStatus()
     
     // Poll for status updates every 1 second to keep popup in sync
     const statusInterval = setInterval(updateStatus, 1000)
@@ -118,21 +205,43 @@ export const EyeTrackerProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     // Also listen for storage changes for immediate updates
     const handleStorageChange = (changes: any, namespace: string) => {
       if (namespace === 'local') {
+        let shouldUpdateCamera = false
+        
         if (changes.eyeTrackerStatus) {
           console.log('Eye tracker status changed in storage:', changes.eyeTrackerStatus.newValue)
           const newStatus = changes.eyeTrackerStatus.newValue
           setDeviceStatus(newStatus)
-          
-          // Start/stop camera polling based on connection status
-          if (newStatus === DeviceStatus.CONNECTED) {
+          shouldUpdateCamera = true
+        }
+        
+        if (changes.eyeTrackerConnected) {
+          console.log('Eye tracker connection changed in storage:', changes.eyeTrackerConnected.newValue)
+          // If we have connection info but no status, derive status from connection
+          if (changes.eyeTrackerConnected.newValue && !changes.eyeTrackerStatus) {
+            setDeviceStatus(DeviceStatus.CONNECTED)
+            shouldUpdateCamera = true
+          }
+        }
+        
+        if (changes.eyeTrackerCalibrated) {
+          console.log('Eye tracker calibration changed in storage:', changes.eyeTrackerCalibrated.newValue)
+          setIsCalibrated(changes.eyeTrackerCalibrated.newValue)
+        }
+        
+        if (changes.eyeTrackerTracking) {
+          console.log('Eye tracker tracking changed in storage:', changes.eyeTrackerTracking.newValue)
+          setIsTracking(changes.eyeTrackerTracking.newValue)
+        }
+        
+        // Start/stop camera polling based on connection status
+        if (shouldUpdateCamera) {
+          const isConnectedNow = changes.eyeTrackerStatus?.newValue === DeviceStatus.CONNECTED || 
+                                changes.eyeTrackerConnected?.newValue === true
+          if (isConnectedNow) {
             startCameraPolling()
           } else {
             stopCameraPolling()
           }
-        }
-        if (changes.eyeTrackerConnected) {
-          console.log('Eye tracker connection changed in storage:', changes.eyeTrackerConnected.newValue)
-          // The status change will handle the UI update
         }
       }
     }
@@ -219,6 +328,8 @@ export const EyeTrackerProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const value = {
     deviceStatus,
     isCalibrating,
+    isCalibrated,
+    isTracking,
     calibrationResult,
     currentGaze,
     wsUrl,

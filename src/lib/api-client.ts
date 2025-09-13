@@ -135,17 +135,19 @@ class CogixAPIClient {
     data: any,
     apiKey: string
   ): Promise<void> {
-    const response = await fetch(
-      `${DATA_IO_URL}/${userId}/${projectId}/${participantId}/${sessionId}`,
-      {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify(data),
-      }
-    )
+    // In browser context, don't set Authorization header to avoid Origin conflict
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    }
+    
+    // Add API key as a query parameter instead of header to avoid Origin/Authorization conflict
+    const url = `${DATA_IO_URL}/${userId}/${projectId}/${participantId}/${sessionId}?api_key=${encodeURIComponent(apiKey)}`
+    
+    const response = await fetch(url, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify(data),
+    })
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({ message: response.statusText }))

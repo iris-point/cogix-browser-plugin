@@ -17,6 +17,8 @@ export class EyeTrackerManager {
   private wsUrl: string = 'wss://127.0.0.1:8443'
   private isConnected: boolean = false
   private deviceStatus: DeviceStatus = DeviceStatus.DISCONNECTED
+  private isCalibrated: boolean = false
+  private isTracking: boolean = false
   private latestCameraFrame: { imageData: string; timestamp: number } | null = null
 
   private constructor() {
@@ -54,6 +56,9 @@ export class EyeTrackerManager {
 
       this.tracker.on('connected', () => {
         console.log('Persistent eye tracker connected - initializing...')
+        this.isConnected = true
+        this.deviceStatus = DeviceStatus.CONNECTED
+        this.broadcastStatus() // Ensure status is broadcast immediately
         
         // Auto-initialize sequence
         setTimeout(() => {
@@ -66,12 +71,27 @@ export class EyeTrackerManager {
           }, 500)
         }, 100)
       })
+      
+      this.tracker.on('disconnected', () => {
+        console.log('Persistent eye tracker disconnected')
+        this.isConnected = false
+        this.isCalibrated = false
+        this.isTracking = false
+        this.deviceStatus = DeviceStatus.DISCONNECTED
+        this.broadcastStatus() // Ensure status is broadcast immediately
+      })
 
       this.tracker.on('gazeData', (data: GazeData) => {
         // Broadcast gaze data to all tabs
         this.broadcastGazeData(data)
       })
 
+      this.tracker.on('calibrationStarted', (data: { points: number }) => {
+        console.log('Calibration started:', data)
+        this.deviceStatus = DeviceStatus.CALIBRATING
+        this.broadcastStatus()
+      })
+      
       this.tracker.on('calibrationProgress', (progress: { current: number; total: number }) => {
         console.log('Calibration progress:', progress)
         this.broadcastCalibrationProgress(progress)
@@ -79,6 +99,17 @@ export class EyeTrackerManager {
 
       this.tracker.on('calibrationComplete', (result: CalibrationResult) => {
         console.log('Calibration complete:', result)
+        this.isCalibrated = true
+        
+        // Start tracking automatically after calibration (this will set status to TRACKING)
+        if (this.tracker) {
+          this.tracker.startTracking()
+          // startTracking() sets status to TRACKING and isTracking = true
+          this.deviceStatus = DeviceStatus.TRACKING
+          this.isTracking = true
+        }
+        
+        this.broadcastStatus() // Update status with calibration info
         this.broadcastCalibrationComplete(result)
       })
 
@@ -109,6 +140,16 @@ export class EyeTrackerManager {
       this.tracker.disconnect()
       console.log('Persistent eye tracker disconnected')
     }
+    
+    // Ensure state is reset
+    this.isConnected = false
+    this.isCalibrated = false
+    this.isTracking = false
+    this.deviceStatus = DeviceStatus.DISCONNECTED
+    this.latestCameraFrame = null
+    
+    // Broadcast the disconnected status
+    this.broadcastStatus()
   }
 
   startCalibration(): void {
@@ -139,6 +180,14 @@ export class EyeTrackerManager {
     return this.latestCameraFrame
   }
 
+  isCalibrationComplete(): boolean {
+    return this.isCalibrated
+  }
+
+  isCurrentlyTracking(): boolean {
+    return this.isTracking
+  }
+
   private broadcastStatus(): void {
     // Send to all tabs
     chrome.tabs.query({}, (tabs) => {
@@ -155,10 +204,12 @@ export class EyeTrackerManager {
       })
     })
 
-    // Save status to storage for popup to read
+    // Save comprehensive status to storage for popup to read
     chrome.storage.local.set({
       eyeTrackerStatus: this.deviceStatus,
       eyeTrackerConnected: this.isConnected,
+      eyeTrackerCalibrated: this.isCalibrated,
+      eyeTrackerTracking: this.isTracking,
       eyeTrackerLastUpdate: Date.now()
     })
   }

@@ -26,6 +26,59 @@ let mediaRecorder: MediaRecorder | null = null
 let recordedChunks: Blob[] = []
 let currentStream: MediaStream | null = null
 
+// Gaze point overlay state
+let showGazePoint = false
+let gazePointElement: HTMLElement | null = null
+
+// Create persistent gaze point element
+function createGazePointElement() {
+  if (gazePointElement) return gazePointElement;
+  
+  gazePointElement = document.createElement('div');
+  gazePointElement.id = 'cogix-persistent-gaze-point';
+  gazePointElement.style.cssText = `
+    position: fixed !important;
+    width: 12px !important;
+    height: 12px !important;
+    border-radius: 50% !important;
+    background: rgba(255, 0, 0, 0.8) !important;
+    border: 2px solid rgba(255, 255, 255, 0.9) !important;
+    pointer-events: none !important;
+    z-index: 2147483647 !important;
+    transform: translate(-50%, -50%) !important;
+    transition: all 0.05s ease !important;
+    display: none !important;
+    box-shadow: 0 0 10px rgba(255, 0, 0, 0.5) !important;
+  `;
+  document.body.appendChild(gazePointElement);
+  return gazePointElement;
+}
+
+function updateGazePointPosition(x: number, y: number) {
+  if (!showGazePoint) return; // Don't update if disabled
+  
+  // Eye tracker outputs normalized coordinates (0-1) - convert to screen pixels
+  // This matches the emotion experiment's approach
+  const screenX = x * window.innerWidth;
+  const screenY = y * window.innerHeight;
+  
+  const element = createGazePointElement();
+  element.style.left = `${screenX}px`;
+  element.style.top = `${screenY}px`;
+  element.style.display = 'block';
+  
+  // Debug: Log gaze point updates occasionally
+  if (Math.random() < 0.01) { // Log 1% of updates to avoid spam
+    console.log(`Gaze point updated: normalized(${x.toFixed(3)}, ${y.toFixed(3)}) → screen(${screenX.toFixed(1)}, ${screenY.toFixed(1)}) on viewport(${window.innerWidth}x${window.innerHeight})`);
+  }
+}
+
+function hideGazePoint() {
+  if (gazePointElement) {
+    gazePointElement.style.display = 'none';
+  }
+}
+
 // Helper function to show alert messages
 function showAlert(message: string, container: HTMLElement) {
   const existingAlert = document.getElementById('cogix-alert');
@@ -72,6 +125,7 @@ async function createOverlay() {
   const selectedProjectId = await storage.get('selectedProjectId');
   const selectedProjectName = await storage.get('selectedProjectName');
   const isRecording = await storage.get('isRecording') || false;
+  showGazePoint = await storage.get('showGazePoint') || false;
 
   // Create main container (bottom-left)
   const container = document.createElement('div');
@@ -135,9 +189,21 @@ async function createOverlay() {
     font-weight: 500 !important;
   `;
   projectName.textContent = selectedProjectName || 'No project selected';
+  
+  // Add gaze tracking indicator
+  const gazeIndicator = document.createElement('div');
+  gazeIndicator.id = 'cogix-gaze-indicator';
+  gazeIndicator.style.cssText = `
+    font-size: 10px !important;
+    color: #10b981 !important;
+    margin-top: 2px !important;
+    display: none !important;
+  `;
+  gazeIndicator.textContent = '👁️ Gaze tracking active';
 
   projectInfo.appendChild(projectLabel);
   projectInfo.appendChild(projectName);
+  projectInfo.appendChild(gazeIndicator);
   projectSection.appendChild(projectIcon);
   projectSection.appendChild(projectInfo);
 
@@ -207,43 +273,53 @@ async function createOverlay() {
 
   updateRecordIcon(Boolean(isRecording));
 
-  // Create gaze point visualization
-  let gazePoint: HTMLElement | null = null;
+  // Create gaze point toggle button
+  const gazeToggleButton = document.createElement('button');
+  gazeToggleButton.style.cssText = `
+    width: 32px !important;
+    height: 32px !important;
+    border-radius: 50% !important;
+    background: ${showGazePoint ? '#10b981' : '#f3f4f6'} !important;
+    border: none !important;
+    cursor: pointer !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    transition: all 0.2s ease !important;
+    margin-left: 8px !important;
+  `;
+
+  gazeToggleButton.innerHTML = `
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="${showGazePoint ? 'white' : '#6b7280'}" stroke-width="2">
+      <circle cx="12" cy="12" r="3"></circle>
+      <path d="M12 1v6M12 17v6M4.22 4.22l4.24 4.24M15.54 15.54l4.24 4.24M1 12h6M17 12h6M4.22 19.78l4.24-4.24M15.54 8.46l4.24-4.24"></path>
+    </svg>
+  `;
+
+  gazeToggleButton.title = 'Toggle Gaze Point Overlay';
   
-  const createGazePoint = () => {
-    if (gazePoint) return gazePoint;
+  const updateGazeToggleButton = () => {
+    gazeToggleButton.style.background = showGazePoint ? '#10b981' : '#f3f4f6';
+    const svg = gazeToggleButton.querySelector('svg');
+    if (svg) {
+      svg.setAttribute('stroke', showGazePoint ? 'white' : '#6b7280');
+    }
     
-    gazePoint = document.createElement('div');
-    gazePoint.id = 'cogix-gaze-point';
-    gazePoint.style.cssText = `
-      position: fixed !important;
-      width: 12px !important;
-      height: 12px !important;
-      border-radius: 50% !important;
-      background: rgba(255, 0, 0, 0.7) !important;
-      border: 2px solid rgba(255, 255, 255, 0.8) !important;
-      pointer-events: none !important;
-      z-index: 2147483646 !important;
-      transform: translate(-50%, -50%) !important;
-      transition: all 0.1s ease !important;
-      display: none !important;
-    `;
-    document.body.appendChild(gazePoint);
-    return gazePoint;
-  };
-  
-  const updateGazePoint = (x: number, y: number) => {
-    const point = createGazePoint();
-    point.style.left = `${x}px`;
-    point.style.top = `${y}px`;
-    point.style.display = 'block';
-  };
-  
-  const hideGazePoint = () => {
-    if (gazePoint) {
-      gazePoint.style.display = 'none';
+    // Show/hide existing gaze point
+    if (!showGazePoint && gazePointElement) {
+      gazePointElement.style.display = 'none';
     }
   };
+  
+  gazeToggleButton.onclick = () => {
+    showGazePoint = !showGazePoint;
+    storage.set('showGazePoint', showGazePoint);
+    updateGazeToggleButton();
+    console.log('Gaze point overlay toggled:', showGazePoint);
+  };
+  
+  // Set initial button state
+  updateGazeToggleButton();
 
   // Handle record button click
   recordButton.onclick = async () => {
@@ -258,10 +334,19 @@ async function createOverlay() {
       return;
     }
     
-    // Check if eye tracker is connected
-    const eyeTrackerConnected = await storage.get('eyeTrackerConnected');
-    if (!eyeTrackerConnected) {
+    // Check if eye tracker is connected and calibrated
+    const eyeTrackerStatus = await chrome.storage.local.get([
+      'eyeTrackerConnected', 
+      'eyeTrackerCalibrated'
+    ]);
+    
+    if (!eyeTrackerStatus.eyeTrackerConnected) {
       showAlert('Please connect eye tracker from the extension popup first', container);
+      return;
+    }
+    
+    if (!eyeTrackerStatus.eyeTrackerCalibrated) {
+      showAlert('Please calibrate the eye tracker before recording.\nGo to the extension popup and complete calibration.', container);
       return;
     }
     
@@ -345,6 +430,7 @@ async function createOverlay() {
 
   // Assemble components
   controlsSection.appendChild(recordButton);
+  controlsSection.appendChild(gazeToggleButton);
   controlsSection.appendChild(minimizeButton);
   
   panel.appendChild(projectSection);
@@ -641,7 +727,7 @@ async function startCalibration() {
     // Continue with calibration even if fullscreen fails
   }
   
-  // Create full-screen calibration overlay
+  // Create simple calibration overlay - let eye tracker handle the actual calibration
   calibrationOverlay = document.createElement('div')
   calibrationOverlay.id = 'cogix-calibration-overlay'
   calibrationOverlay.style.cssText = `
@@ -659,28 +745,23 @@ async function startCalibration() {
     color: white !important;
   `
   
-  // Add instructions
+  // Simple calibration message - let the eye tracker handle the actual points
   const instructions = document.createElement('div')
   instructions.style.cssText = `
-    position: absolute !important;
-    top: 10% !important;
-    left: 50% !important;
-    transform: translateX(-50%) !important;
     text-align: center !important;
     font-size: 28px !important;
     font-weight: 500 !important;
   `
   instructions.innerHTML = `
     <h2 style="margin-bottom: 30px; font-size: 36px;">Eye Tracker Calibration</h2>
-    <p style="margin-bottom: 20px;">Look at each point that appears and keep your head still</p>
-    <p style="font-size: 24px; color: #4CAF50;">Point <span id="calibration-progress">1</span> of 5</p>
+    <p style="margin-bottom: 20px;">The eye tracker is calibrating...</p>
+    <p style="font-size: 20px; color: #4CAF50;">Please look at the calibration points when they appear</p>
     <div style="margin-top: 40px; font-size: 18px; color: #aaa;">
       <p>Press <strong>ESC</strong> to cancel calibration</p>
-      <p>Press <strong>SPACE</strong> to skip to next point</p>
     </div>
   `
   
-  // Add cancel button in bottom center to avoid overlap with calibration points
+  // Add cancel button
   const cancelButton = document.createElement('button')
   cancelButton.style.cssText = `
     position: absolute !important;
@@ -705,16 +786,6 @@ async function startCalibration() {
     stopCalibration()
   }
   
-  // Add hover effect
-  cancelButton.onmouseover = () => {
-    cancelButton.style.background = 'rgba(239, 68, 68, 1)'
-    cancelButton.style.transform = 'translateX(-50%) translateY(-2px)'
-  }
-  cancelButton.onmouseout = () => {
-    cancelButton.style.background = 'rgba(239, 68, 68, 0.9)'
-    cancelButton.style.transform = 'translateX(-50%)'
-  }
-  
   calibrationOverlay.appendChild(instructions)
   calibrationOverlay.appendChild(cancelButton)
   document.body.appendChild(calibrationOverlay)
@@ -722,17 +793,12 @@ async function startCalibration() {
   // Add keyboard event handlers for calibration control
   document.addEventListener('keydown', handleCalibrationKeyPress)
   
-  // Show first calibration point after a delay
-  setTimeout(() => {
-    showCalibrationPoint(0)
-    
-    // Send calibration start message to background to trigger eye tracker
-    chrome.runtime.sendMessage({
-      type: 'START_EYE_TRACKER_CALIBRATION'
-    }).catch(error => {
-      console.error('Failed to send calibration start message:', error)
-    })
-  }, 1000) // 1 second delay like the emotion experiment
+  // Send calibration start immediately - eye tracker will handle timing
+  chrome.runtime.sendMessage({
+    type: 'START_EYE_TRACKER_CALIBRATION'
+  }).catch(error => {
+    console.error('Failed to send calibration start message:', error)
+  })
 }
 
 function showCalibrationPoint(pointIndex: number) {
@@ -745,6 +811,9 @@ function showCalibrationPoint(pointIndex: number) {
   }
   
   const point = calibrationPoints[pointIndex]
+  console.log(`Showing calibration point ${pointIndex + 1}/5 at normalized coordinates (${point.x}, ${point.y})`)
+  console.log(`This corresponds to screen position: (${point.x * window.innerWidth}px, ${point.y * window.innerHeight}px)`)
+  
   const pointElement = document.createElement('div')
   pointElement.id = 'calibration-point'
   pointElement.style.cssText = `
@@ -781,6 +850,27 @@ function showCalibrationPoint(pointIndex: number) {
   if (progressElement) {
     progressElement.textContent = (pointIndex + 1).toString()
   }
+  
+  // Add debug info to the overlay
+  const debugInfo = document.getElementById('calibration-debug') || document.createElement('div')
+  debugInfo.id = 'calibration-debug'
+  debugInfo.style.cssText = `
+    position: absolute !important;
+    bottom: 120px !important;
+    left: 50% !important;
+    transform: translateX(-50%) !important;
+    color: white !important;
+    font-size: 14px !important;
+    text-align: center !important;
+  `
+  debugInfo.innerHTML = `
+    Point ${pointIndex + 1}/5: (${point.x}, ${point.y})<br>
+    Screen: (${Math.round(point.x * window.innerWidth)}, ${Math.round(point.y * window.innerHeight)})
+  `
+  
+  if (!debugInfo.parentElement) {
+    calibrationOverlay.appendChild(debugInfo)
+  }
 }
 
 function stopCalibration() {
@@ -802,15 +892,9 @@ function stopCalibration() {
     styles.remove()
   }
   
-  // Exit fullscreen (optional - user can stay in fullscreen if they want)
-  try {
-    if (document.fullscreenElement) {
-      document.exitFullscreen()
-      console.log('Exited fullscreen mode')
-    }
-  } catch (error) {
-    console.warn('Could not exit fullscreen:', error)
-  }
+  // Don't exit fullscreen - just hide the calibration interface
+  // User can manually exit fullscreen with ESC if they want
+  console.log('Calibration interface hidden, staying in fullscreen mode')
   
   // Send stop message to background
   chrome.runtime.sendMessage({
@@ -853,20 +937,56 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       break
       
     case 'CALIBRATION_PROGRESS':
-      // Handle calibration progress from eye tracker
+      // message.current is nFinishedNum from eye tracker (1-based)
+      // Respect the original client timing: show point, wait 3s, then eye tracker processes
+      console.log('Calibration progress - nFinishedNum:', message.current)
+      
       if (message.current < 5) {
+        // Show the next point immediately (like original client movePoint())
         showCalibrationPoint(message.current)
+        
+        // The eye tracker will send the command after its own 3s delay
+        // We don't need to add extra delays here
       }
       break
       
     case 'CALIBRATION_COMPLETE':
-      // Calibration finished
+      // Calibration finished - auto-enable gaze point overlay
+      showGazePoint = true
+      storage.set('showGazePoint', true)
+      
+      // Update gaze toggle button appearance
+      const gazeToggleBtn = document.querySelector('#cogix-unified-overlay button[title="Toggle Gaze Point Overlay"]') as HTMLElement
+      if (gazeToggleBtn) {
+        gazeToggleBtn.style.background = '#10b981'
+        const svg = gazeToggleBtn.querySelector('svg')
+        if (svg) {
+          svg.setAttribute('stroke', 'white')
+        }
+      }
+      
+      console.log('Calibration complete - gaze overlay auto-enabled')
+      
       setTimeout(() => {
         stopCalibration()
       }, 2000) // Show completion for 2 seconds
       break
       
     case 'GAZE_DATA':
+      // Debug: Log gaze data reception occasionally
+      if (Math.random() < 0.005) { // Log 0.5% of gaze data to avoid spam
+        console.log('Gaze data received:', message.data.x.toFixed(1), message.data.y.toFixed(1), 'showGazePoint:', showGazePoint);
+      }
+      
+      // Show gaze tracking indicator
+      const gazeIndicator = document.getElementById('cogix-gaze-indicator');
+      if (gazeIndicator) {
+        gazeIndicator.style.display = 'block';
+      }
+      
+      // Always update gaze point position if enabled
+      updateGazePointPosition(message.data.x, message.data.y)
+      
       // Store gaze data if recording
       if (isRecording && recordingStartTime) {
         gazeDataBuffer.push({
@@ -876,14 +996,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           leftEye: message.data.leftEye,
           rightEye: message.data.rightEye
         })
-        
-        // Show gaze point visualization during recording
-        const gazePointElement = document.getElementById('cogix-gaze-point')
-        if (gazePointElement) {
-          gazePointElement.style.left = `${message.data.x}px`
-          gazePointElement.style.top = `${message.data.y}px`
-          gazePointElement.style.display = 'block'
-        }
       }
       break
       

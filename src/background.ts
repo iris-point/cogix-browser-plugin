@@ -223,20 +223,26 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return true;
       
     case 'EYE_TRACKER_STATUS':
-      // Get eye tracker status and also save to storage for popup sync
+      // Get comprehensive eye tracker status and save to storage for popup sync
       const status = eyeTrackerManager.getStatus()
       const isConnected = eyeTrackerManager.isTrackerConnected()
+      const isCalibrated = eyeTrackerManager.isCalibrationComplete()
+      const isTracking = eyeTrackerManager.isCurrentlyTracking()
       
       // Save to storage for popup to read
       chrome.storage.local.set({
         eyeTrackerStatus: status,
         eyeTrackerConnected: isConnected,
+        eyeTrackerCalibrated: isCalibrated,
+        eyeTrackerTracking: isTracking,
         eyeTrackerLastUpdate: Date.now()
       })
       
       sendResponse({
         status: status,
-        isConnected: isConnected
+        isConnected: isConnected,
+        isCalibrated: isCalibrated,
+        isTracking: isTracking
       });
       return true;
       
