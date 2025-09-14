@@ -226,7 +226,10 @@ function updateProgressOverlay(state: UploadProgressState) {
         text-align: center;
       ">
         <div style="font-weight: 600; margin-bottom: 4px;">✅ Upload Completed!</div>
-        <div style="font-size: 11px; opacity: 0.8;">Your recording has been saved successfully</div>
+        <div style="font-size: 11px; opacity: 0.8; margin-bottom: 6px;">Your recording has been saved successfully</div>
+        <div style="font-size: 11px; color: #059669; background: rgba(16, 185, 129, 0.1); padding: 6px; border-radius: 4px; margin-top: 8px;">
+          📍 View in Cogix: <strong>Projects → Eye Tracking → Sessions</strong>
+        </div>
       </div>
     ` : ''}
     
@@ -257,7 +260,7 @@ function updateProgressOverlay(state: UploadProgressState) {
   if (state.stage === 'complete') {
     setTimeout(() => {
       hideUploadProgress();
-    }, 4000);
+    }, 6000); // Give more time to read the success message
   } else if (state.stage === 'error') {
     setTimeout(() => {
       hideUploadProgress();

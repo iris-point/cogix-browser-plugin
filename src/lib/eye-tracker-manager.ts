@@ -58,6 +58,14 @@ export class EyeTrackerManager {
         console.log('Persistent eye tracker connected - initializing...')
         this.isConnected = true
         this.deviceStatus = DeviceStatus.CONNECTED
+        
+        // Update storage for single source of truth
+        chrome.storage.local.set({
+          eyeTrackerConnected: true,
+          eyeTrackerStatus: DeviceStatus.CONNECTED,
+          eyeTrackerLastUpdate: Date.now()
+        })
+        
         this.broadcastStatus() // Ensure status is broadcast immediately
         
         // Auto-initialize sequence
@@ -78,6 +86,16 @@ export class EyeTrackerManager {
         this.isCalibrated = false
         this.isTracking = false
         this.deviceStatus = DeviceStatus.DISCONNECTED
+        
+        // Update storage for single source of truth
+        chrome.storage.local.set({
+          eyeTrackerConnected: false,
+          eyeTrackerCalibrated: false,
+          eyeTrackerTracking: false,
+          eyeTrackerStatus: DeviceStatus.DISCONNECTED,
+          eyeTrackerLastUpdate: Date.now()
+        })
+        
         this.broadcastStatus() // Ensure status is broadcast immediately
       })
 
@@ -92,19 +110,32 @@ export class EyeTrackerManager {
         this.broadcastStatus()
       })
       
-      this.tracker.on('calibrationProgress', (progress: { current: number; total: number }) => {
+      this.tracker.on('calibrationProgress', (progress: any) => {
         console.log('Calibration progress:', progress)
-        this.broadcastCalibrationProgress(progress)
+        // The HHProvider sends nFinishedNum in the progress data
+        // We need to extract and forward it properly
+        const currentPoint = progress.nFinishedNum || progress.current || progress.point
+        this.broadcastCalibrationProgress({
+          current: currentPoint,
+          total: progress.total || 5,
+          nFinishedNum: progress.nFinishedNum
+        })
       })
 
       this.tracker.on('calibrationComplete', (result: CalibrationResult) => {
         console.log('Calibration complete:', result)
         this.isCalibrated = true
         
-        // Start tracking automatically after calibration (this will set status to TRACKING)
+        // Update storage for single source of truth
+        chrome.storage.local.set({
+          eyeTrackerCalibrated: true,
+          calibrationTimestamp: Date.now(),
+          calibrationResult: result
+        })
+        
+        // Start tracking automatically after calibration
         if (this.tracker) {
           this.tracker.startTracking()
-          // startTracking() sets status to TRACKING and isTracking = true
           this.deviceStatus = DeviceStatus.TRACKING
           this.isTracking = true
         }
@@ -148,6 +179,13 @@ export class EyeTrackerManager {
     this.deviceStatus = DeviceStatus.DISCONNECTED
     this.latestCameraFrame = null
     
+    // Clear storage state as well
+    chrome.storage.local.set({
+      eyeTrackerConnected: false,
+      eyeTrackerCalibrated: false,
+      eyeTrackerTracking: false
+    })
+    
     // Broadcast the disconnected status
     this.broadcastStatus()
   }
@@ -157,6 +195,31 @@ export class EyeTrackerManager {
       this.tracker.startCalibration()
     } else {
       throw new Error('Eye tracker not connected')
+    }
+  }
+
+  cancelCalibration(): void {
+    if (this.tracker) {
+      // Call the tracker's cancelCalibration if it exists
+      if (typeof (this.tracker as any).cancelCalibration === 'function') {
+        (this.tracker as any).cancelCalibration()
+      }
+      
+      // Reset calibration state
+      this.isCalibrated = false
+      this.deviceStatus = DeviceStatus.CONNECTED
+      
+      // Update storage
+      chrome.storage.local.set({
+        eyeTrackerCalibrated: false,
+        eyeTrackerStatus: DeviceStatus.CONNECTED,
+        eyeTrackerLastUpdate: Date.now()
+      })
+      
+      // Broadcast the status change
+      this.broadcastStatus()
+      
+      console.log('Calibration cancelled')
     }
   }
 
@@ -238,13 +301,13 @@ export class EyeTrackerManager {
     })
   }
 
-  private broadcastCalibrationProgress(progress: { current: number; total: number }): void {
+  private broadcastCalibrationProgress(progress: { current: number; total: number; nFinishedNum?: number }): void {
     chrome.tabs.query({}, (tabs) => {
       tabs.forEach(tab => {
         if (tab.id) {
           chrome.tabs.sendMessage(tab.id, {
             type: 'CALIBRATION_PROGRESS',
-            current: progress.current,
+            current: progress.nFinishedNum || progress.current,
             total: progress.total
           }).catch(() => {
             // Ignore errors

@@ -352,14 +352,23 @@ async function createOverlay() {
       const statusResponse = await chrome.runtime.sendMessage({ type: 'EYE_TRACKER_STATUS' });
       eyeTrackerStatus = {
         eyeTrackerConnected: statusResponse.isConnected,
-        eyeTrackerCalibrated: statusResponse.isCalibrated
+        eyeTrackerCalibrated: statusResponse.isCalibrated,
+        isTracking: statusResponse.isTracking
       };
       console.log('Fresh eye tracker status:', eyeTrackerStatus);
+      
+      // Also update local storage for consistency
+      chrome.storage.local.set({
+        eyeTrackerConnected: statusResponse.isConnected,
+        eyeTrackerCalibrated: statusResponse.isCalibrated,
+        eyeTrackerTracking: statusResponse.isTracking
+      });
     } catch (error) {
       console.warn('Failed to get fresh status, falling back to storage:', error);
       eyeTrackerStatus = await chrome.storage.local.get([
         'eyeTrackerConnected', 
-        'eyeTrackerCalibrated'
+        'eyeTrackerCalibrated',
+        'eyeTrackerTracking'
       ]);
     }
     
@@ -369,9 +378,11 @@ async function createOverlay() {
     }
     
     if (!eyeTrackerStatus.eyeTrackerCalibrated) {
-      showAlert('Please calibrate the eye tracker before recording.\nGo to the extension popup and complete calibration.', container);
+      showAlert('Please calibrate the eye tracker before recording.\nClick the Calibrate button in the extension popup.', container);
       return;
     }
+    
+    console.log('Eye tracker is connected and calibrated, ready to record');
     
     const currentlyRecording = await storage.get('isRecording') || false;
     const newRecordingState = !currentlyRecording;
@@ -1114,7 +1125,7 @@ async function startCalibration() {
     // Continue with calibration even if fullscreen fails
   }
   
-  // Create simple calibration overlay - let eye tracker handle the actual calibration
+  // Create calibration overlay with instructions
   calibrationOverlay = document.createElement('div')
   calibrationOverlay.id = 'cogix-calibration-overlay'
   calibrationOverlay.style.cssText = `
@@ -1132,64 +1143,125 @@ async function startCalibration() {
     color: white !important;
   `
   
-  // Simple calibration message - let the eye tracker handle the actual points
+  // Show instructions first
   const instructions = document.createElement('div')
+  instructions.id = 'calibration-instructions'
   instructions.style.cssText = `
     text-align: center !important;
-    font-size: 28px !important;
-    font-weight: 500 !important;
+    font-size: 24px !important;
+    font-weight: 400 !important;
+    max-width: 800px !important;
+    padding: 40px !important;
   `
   instructions.innerHTML = `
-    <h2 style="margin-bottom: 30px; font-size: 36px;">Eye Tracker Calibration</h2>
-    <p style="margin-bottom: 20px;">The eye tracker is calibrating...</p>
-    <p style="font-size: 20px; color: #4CAF50;">Please look at the calibration points when they appear</p>
-    <div style="margin-top: 40px; font-size: 18px; color: #aaa;">
-      <p>Press <strong>ESC</strong> to cancel calibration</p>
+    <h2 style="margin-bottom: 30px; font-size: 42px; font-weight: 600;">Eye Tracker Calibration</h2>
+    <div style="margin-bottom: 40px; line-height: 1.6;">
+      <p style="margin-bottom: 20px; font-size: 26px;">📍 <strong>Instructions:</strong></p>
+      <p style="margin-bottom: 15px; font-size: 20px; color: #e0e0e0;">
+        1. Look directly at each calibration point when it appears
+      </p>
+      <p style="margin-bottom: 15px; font-size: 20px; color: #e0e0e0;">
+        2. Keep your head still and focus on the center of each point
+      </p>
+      <p style="margin-bottom: 15px; font-size: 20px; color: #e0e0e0;">
+        3. Each point will be shown for 3 seconds
+      </p>
+      <p style="margin-bottom: 15px; font-size: 20px; color: #e0e0e0;">
+        4. There are 5 calibration points in total
+      </p>
+    </div>
+    <button id="start-calibration-btn" style="
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+      color: white !important;
+      border: none !important;
+      padding: 16px 48px !important;
+      font-size: 20px !important;
+      font-weight: 500 !important;
+      border-radius: 8px !important;
+      cursor: pointer !important;
+      transition: transform 0.2s ease !important;
+      margin-bottom: 30px !important;
+    " onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'">
+      Start Calibration
+    </button>
+    <div style="margin-top: 20px; font-size: 16px; color: #aaa;">
+      <p>Press <strong>ESC</strong> at any time to cancel</p>
     </div>
   `
   
-  // Add cancel button
-  const cancelButton = document.createElement('button')
-  cancelButton.style.cssText = `
-    position: absolute !important;
-    bottom: 50px !important;
-    left: 50% !important;
-    transform: translateX(-50%) !important;
-    background: rgba(239, 68, 68, 0.9) !important;
-    color: white !important;
-    border: none !important;
-    padding: 15px 30px !important;
-    border-radius: 8px !important;
-    font-size: 18px !important;
-    font-weight: 500 !important;
-    cursor: pointer !important;
-    transition: all 0.2s ease !important;
-    z-index: 2147483651 !important;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3) !important;
-  `
-  cancelButton.textContent = '✕ Cancel Calibration (ESC)'
-  cancelButton.onclick = () => {
-    console.log('Cancel button clicked')
-    stopCalibration()
-  }
-  
   calibrationOverlay.appendChild(instructions)
-  calibrationOverlay.appendChild(cancelButton)
   document.body.appendChild(calibrationOverlay)
   
   // Add keyboard event handlers for calibration control
   document.addEventListener('keydown', handleCalibrationKeyPress)
   
-  // Send calibration start immediately - eye tracker will handle timing
-  chrome.runtime.sendMessage({
-    type: 'START_EYE_TRACKER_CALIBRATION'
-  }).catch(error => {
-    console.error('Failed to send calibration start message:', error)
-  })
+  // Wait for user to click start button
+  const startBtn = document.getElementById('start-calibration-btn')
+  if (startBtn) {
+    startBtn.onclick = () => {
+      // Hide instructions
+      instructions.style.display = 'none'
+      
+      // Show calibration progress UI
+      const progressUI = document.createElement('div')
+      progressUI.id = 'calibration-progress-ui'
+      progressUI.style.cssText = `
+        text-align: center !important;
+        font-size: 20px !important;
+        color: white !important;
+      `
+      progressUI.innerHTML = `
+        <p style="margin-bottom: 20px; font-size: 24px;">Look at the calibration point</p>
+        <p style="font-size: 18px; color: #4CAF50;">Point <span id="calibration-progress">1</span> of 5</p>
+      `
+      calibrationOverlay.appendChild(progressUI)
+      
+      // Add cancel button
+      const cancelButton = document.createElement('button')
+      cancelButton.style.cssText = `
+        position: absolute !important;
+        bottom: 50px !important;
+        left: 50% !important;
+        transform: translateX(-50%) !important;
+        background: rgba(239, 68, 68, 0.9) !important;
+        color: white !important;
+        border: none !important;
+        padding: 15px 30px !important;
+        border-radius: 8px !important;
+        font-size: 18px !important;
+        font-weight: 500 !important;
+        cursor: pointer !important;
+        transition: all 0.2s ease !important;
+        z-index: 2147483651 !important;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3) !important;
+      `
+      cancelButton.textContent = '✕ Cancel Calibration (ESC)'
+      cancelButton.onclick = () => {
+        console.log('Cancel button clicked')
+        stopCalibration()
+      }
+      calibrationOverlay.appendChild(cancelButton)
+      
+      // Start the actual calibration
+      // Show first calibration point immediately
+      showCalibrationPoint(0)
+      console.log('Showing initial calibration point')
+      
+      // Send start message immediately - HHProvider will wait 3 seconds
+      setTimeout(() => {
+        console.log('Sending START_EYE_TRACKER_CALIBRATION message')
+        chrome.runtime.sendMessage({
+          type: 'START_EYE_TRACKER_CALIBRATION'
+        }).catch(error => {
+          console.error('Failed to send calibration start message:', error)
+        })
+      }, 100) // Small delay to ensure point is visible
+    }
+  }
 }
 
 function showCalibrationPoint(pointIndex: number) {
-  if (!calibrationOverlay || pointIndex >= calibrationPoints.length) return
+  if (!calibrationOverlay || pointIndex < 0 || pointIndex >= calibrationPoints.length) return
   
   // Remove existing point
   const existingPoint = document.getElementById('calibration-point')
@@ -1203,18 +1275,21 @@ function showCalibrationPoint(pointIndex: number) {
   
   const pointElement = document.createElement('div')
   pointElement.id = 'calibration-point'
+  
+  // Keep the original circular point design but make it more visible
   pointElement.style.cssText = `
     position: absolute !important;
-    width: 20px !important;
-    height: 20px !important;
+    width: 30px !important;
+    height: 30px !important;
     border-radius: 50% !important;
     background: #4CAF50 !important;
-    border: 3px solid white !important;
-    box-shadow: 0 0 20px rgba(76, 175, 80, 0.6) !important;
+    border: 4px solid white !important;
+    box-shadow: 0 0 30px rgba(76, 175, 80, 0.8), 0 0 60px rgba(76, 175, 80, 0.4) !important;
     transform: translate(-50%, -50%) !important;
     left: ${point.x * 100}% !important;
     top: ${point.y * 100}% !important;
     animation: calibrationPulse 1s infinite alternate !important;
+    pointer-events: none !important;
   `
   
   // Add pulse animation
@@ -1279,11 +1354,19 @@ function stopCalibration() {
     styles.remove()
   }
   
-  // Don't exit fullscreen - just hide the calibration interface
-  // User can manually exit fullscreen with ESC if they want
-  console.log('Calibration interface hidden, staying in fullscreen mode')
+  // Exit fullscreen when calibration is cancelled
+  if (document.exitFullscreen) {
+    document.exitFullscreen()
+  } else if ((document as any).mozCancelFullScreen) {
+    (document as any).mozCancelFullScreen()
+  } else if ((document as any).webkitExitFullscreen) {
+    (document as any).webkitExitFullscreen()
+  } else if ((document as any).msExitFullscreen) {
+    (document as any).msExitFullscreen()
+  }
+  console.log('Calibration cancelled, exiting fullscreen')
   
-  // Send stop message to background
+  // Send stop message to background to update eye tracker state
   chrome.runtime.sendMessage({
     type: 'STOP_EYE_TRACKER_CALIBRATION'
   }).catch(error => {
@@ -1336,20 +1419,55 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       
     case 'CALIBRATION_PROGRESS':
       // message.current is nFinishedNum from eye tracker (1-based)
-      // Respect the original client timing: show point, wait 3s, then eye tracker processes
       console.log('Calibration progress - nFinishedNum:', message.current)
       
-      if (message.current < 5) {
-        // Show the next point immediately (like original client movePoint())
-        showCalibrationPoint(message.current)
+      if (message.current > 0 && message.current <= 5) {
+        // Update progress counter
+        const progressElement = document.getElementById('calibration-progress')
+        if (progressElement) {
+          progressElement.textContent = Math.min(message.current + 1, 5).toString()
+        }
         
-        // The eye tracker will send the command after its own 3s delay
-        // We don't need to add extra delays here
+        if (message.current < 5) {
+          // Show the next calibration point immediately
+          console.log(`Point ${message.current} completed, showing next point ${message.current + 1}`)
+          showCalibrationPoint(message.current) // This uses nFinishedNum as array index
+          
+          // HHProvider will wait 3 seconds before sending the next command
+          // This gives the user time to move their gaze to the new point
+        } else if (message.current === 5) {
+          console.log('All 5 calibration points completed')
+          // Remove the calibration point since we're done
+          const existingPoint = document.getElementById('calibration-point')
+          if (existingPoint) {
+            existingPoint.remove()
+          }
+        }
       }
       break
       
     case 'CALIBRATION_COMPLETE':
-      // Calibration finished - auto-enable gaze point overlay
+      console.log('Calibration complete message received')
+      
+      // Update calibration state in storage for single source of truth
+      chrome.storage.local.set({
+        eyeTrackerCalibrated: true,
+        calibrationTimestamp: Date.now()
+      })
+      
+      // Show completion message
+      if (calibrationOverlay) {
+        calibrationOverlay.innerHTML = `
+          <div style="text-align: center; color: white;">
+            <div style="font-size: 48px; margin-bottom: 20px;">✅</div>
+            <h2 style="font-size: 36px; margin-bottom: 20px;">Calibration Complete!</h2>
+            <p style="font-size: 20px; color: #4CAF50;">Eye tracking is now calibrated and ready</p>
+            <p style="font-size: 16px; color: #aaa; margin-top: 20px;">You can now start recording</p>
+          </div>
+        `
+      }
+      
+      // Auto-enable gaze point overlay
       showGazePoint = true
       storage.set('showGazePoint', true)
       
@@ -1363,11 +1481,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
       }
       
-      console.log('Calibration complete - gaze overlay auto-enabled')
+      // Update the gaze indicator to show calibrated status
+      const calibratedGazeIndicator = document.getElementById('cogix-gaze-indicator')
+      if (calibratedGazeIndicator) {
+        calibratedGazeIndicator.textContent = '👁️ Calibrated & tracking'
+        calibratedGazeIndicator.style.color = '#10b981'
+      }
       
       setTimeout(() => {
         stopCalibration()
-      }, 2000) // Show completion for 2 seconds
+        // Exit fullscreen after calibration
+        if (document.exitFullscreen) {
+          document.exitFullscreen()
+        }
+      }, 3000) // Show completion for 3 seconds
       break
       
     case 'GAZE_DATA':

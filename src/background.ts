@@ -294,9 +294,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return true;
       
     case 'STOP_EYE_TRACKER_CALIBRATION':
-      // Stop calibration (handled by content script UI)
-      debugLog('BACKGROUND', 'Calibration stopped');
-      sendResponse({ success: true });
+      // Stop/cancel calibration
+      debugLog('BACKGROUND', 'Stopping eye tracker calibration');
+      try {
+        eyeTrackerManager.cancelCalibration();
+        sendResponse({ success: true });
+      } catch (error: any) {
+        debugLog('BACKGROUND', 'Failed to stop calibration', { error: error.message });
+        sendResponse({ success: false, error: error.message });
+      }
       return true;
 
     case 'DATA_IO_TEST_CONNECTION':
