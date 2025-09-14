@@ -550,9 +550,7 @@ export class BrowserDataIOClient {
     }>;
   }> {
     const urlsToTest = [
-      'https://api.cogix.app',
-      'https://cogix-backend.herokuapp.com', // Alternative production URL
-      API_BASE_URL // Always production URL now
+      API_BASE_URL // Only test the production API URL
     ];
 
     const results = [];

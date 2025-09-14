@@ -677,9 +677,7 @@ export class BackgroundDataIOClient {
     }>;
   }> {
     const urlsToTest = [
-      'https://api.cogix.app',
-      'https://cogix-backend.herokuapp.com', // Alternative production URL
-      API_BASE_URL
+      API_BASE_URL // Only test the production API URL
     ];
 
     const results = [];
