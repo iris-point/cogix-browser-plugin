@@ -247,8 +247,36 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       // Get comprehensive eye tracker status and save to storage for popup sync
       const status = eyeTrackerManager.getStatus()
       const isConnected = eyeTrackerManager.isTrackerConnected()
-      const isCalibrated = eyeTrackerManager.isCalibrationComplete()
+      let isCalibrated = eyeTrackerManager.isCalibrationComplete()
       const isTracking = eyeTrackerManager.isCurrentlyTracking()
+      
+      // If not calibrated in memory but connected, check storage as it might not be restored yet
+      if (!isCalibrated && isConnected) {
+        chrome.storage.local.get(['eyeTrackerCalibrated'], (result) => {
+          if (result.eyeTrackerCalibrated === true) {
+            isCalibrated = true
+            // Update the manager's flag too
+            eyeTrackerManager.setCalibrationState(true)
+          }
+          
+          // Save to storage for popup to read
+          chrome.storage.local.set({
+            eyeTrackerStatus: status,
+            eyeTrackerConnected: isConnected,
+            eyeTrackerCalibrated: isCalibrated,
+            eyeTrackerTracking: isTracking,
+            eyeTrackerLastUpdate: Date.now()
+          })
+          
+          sendResponse({
+            status: status,
+            isConnected: isConnected,
+            isCalibrated: isCalibrated,
+            isTracking: isTracking
+          });
+        })
+        return true; // Will respond asynchronously
+      }
       
       // Save to storage for popup to read
       chrome.storage.local.set({

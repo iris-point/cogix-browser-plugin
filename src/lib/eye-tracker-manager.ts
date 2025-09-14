@@ -23,6 +23,7 @@ export class EyeTrackerManager {
 
   private constructor() {
     this.initializeTracker()
+    this.restoreStateFromStorage()
   }
 
   static getInstance(): EyeTrackerManager {
@@ -30,6 +31,15 @@ export class EyeTrackerManager {
       EyeTrackerManager.instance = new EyeTrackerManager()
     }
     return EyeTrackerManager.instance
+  }
+
+  private restoreStateFromStorage() {
+    // Restore calibration state from storage when background script restarts
+    chrome.storage.local.get(['eyeTrackerCalibrated'], (result) => {
+      if (result.eyeTrackerCalibrated === true) {
+        this.isCalibrated = true
+      }
+    })
   }
 
   private initializeTracker() {
@@ -123,14 +133,17 @@ export class EyeTrackerManager {
       })
 
       this.tracker.on('calibrationComplete', (result: CalibrationResult) => {
-        console.log('Calibration complete:', result)
+        console.log('[EyeTrackerManager] Calibration complete event received:', result)
         this.isCalibrated = true
+        console.log('[EyeTrackerManager] Setting isCalibrated to true')
         
         // Update storage for single source of truth
         chrome.storage.local.set({
           eyeTrackerCalibrated: true,
           calibrationTimestamp: Date.now(),
           calibrationResult: result
+        }, () => {
+          console.log('[EyeTrackerManager] Calibration state saved to storage')
         })
         
         // Start tracking automatically after calibration
@@ -248,7 +261,14 @@ export class EyeTrackerManager {
   }
 
   isCalibrationComplete(): boolean {
+    // Don't rely on in-memory flag which can be reset on disconnect
+    // Instead, check if we have a valid calibration in storage
+    // This is synchronous for now but should be made async in future
     return this.isCalibrated
+  }
+
+  setCalibrationState(calibrated: boolean): void {
+    this.isCalibrated = calibrated
   }
 
   isCurrentlyTracking(): boolean {

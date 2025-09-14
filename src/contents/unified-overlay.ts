@@ -350,6 +350,7 @@ async function createOverlay() {
     let eyeTrackerStatus;
     try {
       const statusResponse = await chrome.runtime.sendMessage({ type: 'EYE_TRACKER_STATUS' });
+      console.log('Background script returned status:', statusResponse);
       eyeTrackerStatus = {
         eyeTrackerConnected: statusResponse.isConnected,
         eyeTrackerCalibrated: statusResponse.isCalibrated,
@@ -1447,12 +1448,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       break
       
     case 'CALIBRATION_COMPLETE':
-      console.log('Calibration complete message received')
+      console.log('Calibration complete message received from background')
       
       // Update calibration state in storage for single source of truth
       chrome.storage.local.set({
         eyeTrackerCalibrated: true,
         calibrationTimestamp: Date.now()
+      }, () => {
+        console.log('Calibration state saved to storage: eyeTrackerCalibrated = true')
       })
       
       // Show completion message
