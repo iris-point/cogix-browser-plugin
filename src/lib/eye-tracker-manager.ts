@@ -200,9 +200,13 @@ export class EyeTrackerManager {
 
   cancelCalibration(): void {
     if (this.tracker) {
-      // Call the tracker's cancelCalibration if it exists
-      if (typeof (this.tracker as any).cancelCalibration === 'function') {
-        (this.tracker as any).cancelCalibration()
+      // Call the tracker's stopCalibration method (not cancelCalibration)
+      // This will properly reset the tracker's calibration state and emit 'calibrationCancelled'
+      if (typeof (this.tracker as any).stopCalibration === 'function') {
+        console.log('[EyeTrackerManager] Calling tracker.stopCalibration()')
+        ;(this.tracker as any).stopCalibration()
+      } else {
+        console.warn('[EyeTrackerManager] stopCalibration method not found on tracker')
       }
       
       // Reset calibration state
@@ -219,7 +223,7 @@ export class EyeTrackerManager {
       // Broadcast the status change
       this.broadcastStatus()
       
-      console.log('Calibration cancelled')
+      console.log('Calibration cancelled and tracker state reset')
     }
   }
 
