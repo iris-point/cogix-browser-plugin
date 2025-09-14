@@ -77,23 +77,91 @@ export const ProjectSelector = ({ onProjectSelected }: ProjectSelectorProps) => 
   }
 
   const loadSelectedProject = async () => {
+    // Try new unified format first
+    try {
+      const projectData = await chrome.storage.sync.get(['selectedProject'])
+      if (projectData.selectedProject) {
+        setSelectedProject({
+          id: projectData.selectedProject.id,
+          name: projectData.selectedProject.name,
+          description: projectData.selectedProject.description || '',
+          created_at: '',
+          updated_at: ''
+        })
+        console.log('📋 Loaded project from unified storage:', projectData.selectedProject.name)
+        return
+      }
+    } catch (error) {
+      console.warn('Failed to load from unified storage, trying old format:', error)
+    }
+    
+    // Fallback to old format
     const storedProjectId = await storage.get('selectedProjectId')
     const storedProjectName = await storage.get('selectedProjectName')
     
     if (storedProjectId && storedProjectName) {
-      setSelectedProject({
+      const project = {
         id: storedProjectId,
         name: storedProjectName,
+        description: '',
         created_at: '',
         updated_at: ''
+      }
+      setSelectedProject(project)
+      
+      // Migrate to new format
+      await chrome.storage.sync.set({
+        selectedProject: {
+          id: project.id,
+          name: project.name,
+          description: project.description
+        }
       })
+      console.log('📋 Migrated project to unified storage:', project.name)
     }
   }
 
   const handleSelectProject = async (project: Project) => {
     setSelectedProject(project)
-    await storage.set('selectedProjectId', project.id)
-    await storage.set('selectedProjectName', project.name)
+    
+    const projectInfo = {
+      id: project.id,
+      name: project.name,
+      description: project.description || ''
+    }
+    
+    console.log('📋 Selecting project:', project.name, project.id)
+    
+    // Store in storage (both formats for compatibility)
+    const storagePromises = [
+      storage.set('selectedProjectId', project.id),
+      storage.set('selectedProjectName', project.name),
+      chrome.storage.sync.set({ selectedProject: projectInfo })
+    ]
+    
+    await Promise.all(storagePromises)
+    console.log('💾 Project stored in all formats')
+    
+    // Immediately notify all content scripts (no storage delay)
+    try {
+      const tabs = await chrome.tabs.query({})
+      const notificationPromises = tabs.map(tab => {
+        if (tab.id) {
+          return chrome.tabs.sendMessage(tab.id, {
+            type: 'PROJECT_SELECTED',
+            project: projectInfo
+          }).catch(error => {
+            // Ignore errors for tabs without content script
+          })
+        }
+      })
+      
+      await Promise.allSettled(notificationPromises)
+      console.log('📡 Project selection broadcasted to all tabs immediately')
+    } catch (error) {
+      console.warn('Failed to broadcast project selection:', error)
+    }
+    
     setIsOpen(false)
     onProjectSelected?.(project)
   }

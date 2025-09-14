@@ -1,5 +1,6 @@
 import { debugLog } from './utils/debug'
 import { EyeTrackerManager } from './lib/eye-tracker-manager'
+import { backgroundDataIOClient } from './lib/backgroundDataIOClient'
 
 // Log when background script starts
 debugLog('BACKGROUND', 'Background script initialized');
@@ -17,8 +18,15 @@ chrome.runtime.onInstalled.addListener((details) => {
   }
 });
 
-// API base URL
+// API base URL - Browser plugin always uses production (no localhost)
+// IMPORTANT: Never use localhost - browser plugins should only connect to production APIs
 const API_BASE_URL = 'https://api.cogix.app';
+
+// Validate configuration
+if (API_BASE_URL.includes('localhost')) {
+  console.error('❌ CONFIGURATION ERROR: Browser plugin should never use localhost URLs!');
+  throw new Error('Invalid configuration: localhost URLs not allowed in browser plugin');
+}
 
 // Listen for messages from content scripts or popup
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -125,6 +133,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         });
       });
       return true; // Keep message channel open for async response
+
+    case 'GET_SELECTED_PROJECT':
+      // Get fresh project data to avoid storage sync delays
+      chrome.storage.sync.get(['selectedProject'], (result) => {
+        debugLog('BACKGROUND', 'Selected project retrieved', {
+          hasProject: !!result.selectedProject,
+          projectName: result.selectedProject?.name
+        });
+        sendResponse({
+          project: result.selectedProject || null
+        });
+      });
+      return true;
       
     case 'DEBUG_INFO':
       // Get debug information
@@ -276,6 +297,104 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       // Stop calibration (handled by content script UI)
       debugLog('BACKGROUND', 'Calibration stopped');
       sendResponse({ success: true });
+      return true;
+
+    case 'DATA_IO_TEST_CONNECTION':
+      // Test data-io connection from background script (avoids CORS)
+      const { screenDimensions: testScreenDimensions } = request;
+      debugLog('BACKGROUND', 'Testing data-io connection', {
+        projectId: request.projectId,
+        screenDimensions: testScreenDimensions
+      });
+      (async () => {
+        try {
+          const diagnostics = await backgroundDataIOClient.diagnoseConfiguration();
+          const connectivity = await backgroundDataIOClient.testBackendConnectivity();
+          const testResults = await backgroundDataIOClient.testConnectionAndAuth(request.projectId, testScreenDimensions);
+          
+          sendResponse({ 
+            success: true, 
+            diagnostics,
+            connectivity,
+            testResults
+          });
+        } catch (error) {
+          debugLog('BACKGROUND', 'Data-io test failed', { error: error.message });
+          sendResponse({ 
+            success: false, 
+            error: error instanceof Error ? error.message : String(error)
+          });
+        }
+      })();
+      return true;
+
+    case 'DATA_IO_UPLOAD_SESSION':
+      // Upload complete eye tracking session from background script
+      const { projectId: uploadProjectId, sessionId: uploadSessionId, videoBlob, gazeData, metadata, screenDimensions } = request;
+      debugLog('BACKGROUND', 'Uploading eye tracking session', { 
+        sessionId: uploadSessionId, 
+        projectId: uploadProjectId,
+        videoSize: videoBlob?.length || 0,
+        gazePoints: gazeData?.length || 0
+      });
+      
+      (async () => {
+        try {
+          // Convert serialized blob data back to File objects
+          const videoFile = videoBlob ? new File([new Uint8Array(videoBlob)], `recording-${uploadSessionId}.webm`, { 
+            type: 'video/webm' 
+          }) : undefined;
+          
+          const gazeFile = gazeData ? new File([JSON.stringify(gazeData)], `gaze-data-${uploadSessionId}.json`, { 
+            type: 'application/json' 
+          }) : undefined;
+
+          console.log('📁 [BACKGROUND] Created files for upload:', {
+            video: videoFile ? `${videoFile.name} (${videoFile.size} bytes)` : 'None',
+            gaze: gazeFile ? `${gazeFile.name} (${gazeFile.size} bytes)` : 'None'
+          });
+
+          const result = await backgroundDataIOClient.submitEyeTrackingSession(
+            uploadProjectId,
+            uploadSessionId,
+            {
+              videoFile,
+              gazeDataFile: gazeFile,
+              gazeData: gazeData,
+              participantId: 'browser-extension',
+              metadata: {
+                ...metadata,
+                // Use screen dimensions from content script if provided
+                screen_width: screenDimensions?.width || metadata?.screen_width || 1920,
+                screen_height: screenDimensions?.height || metadata?.screen_height || 1080
+              },
+              onProgress: (stage: string, progress: number, details?: any) => {
+                // Send progress updates back to content script
+                if (sender.tab?.id) {
+                  chrome.tabs.sendMessage(sender.tab.id, {
+                    type: 'UPLOAD_PROGRESS',
+                    sessionId: uploadSessionId,
+                    stage,
+                    progress,
+                    details
+                  }).catch(error => {
+                    console.warn('[BACKGROUND] Failed to send progress update:', error);
+                  });
+                }
+              }
+            }
+          );
+          
+          debugLog('BACKGROUND', 'Session upload successful', { sessionId: uploadSessionId, result });
+          sendResponse({ success: true, result });
+        } catch (error) {
+          debugLog('BACKGROUND', 'Session upload failed', { sessionId: uploadSessionId, error: error.message });
+          sendResponse({ 
+            success: false, 
+            error: error instanceof Error ? error.message : String(error)
+          });
+        }
+      })();
       return true;
       
     default:

@@ -1,5 +1,16 @@
 import type { PlasmoCSConfig } from "plasmo"
 import { Storage } from "@plasmohq/storage"
+import type { 
+  GazePoint, 
+  EyeTrackingSessionData, 
+  RecordingMetadata,
+  SessionSubmissionMetadata
+} from '../types/eye-tracking-session'
+import { EYE_TRACKING_CONSTANTS } from '../types/eye-tracking-session'
+import { showUploadProgress, hideUploadProgress } from './upload-progress'
+import { dataIOClient } from '../lib/dataIOClient'
+import { showConnectionTest, showConnectionTestFromBackground } from './connection-test'
+import { validateProjectSelection, getSelectedProject } from '../lib/projectValidation'
 
 export const config: PlasmoCSConfig = {
   matches: ["<all_urls>"],
@@ -15,13 +26,7 @@ console.log('Cogix content script loaded on:', window.location.href)
 // Screen recording state
 let isRecording = false
 let recordingStartTime: number | null = null
-let gazeDataBuffer: Array<{
-  timestamp: number
-  x: number
-  y: number
-  leftEye?: any
-  rightEye?: any
-}> = []
+let gazeDataBuffer: GazePoint[] = []
 let mediaRecorder: MediaRecorder | null = null
 let recordedChunks: Blob[] = []
 let currentStream: MediaStream | null = null
@@ -122,8 +127,8 @@ async function createOverlay() {
   }
 
   // Load initial state
-  const selectedProjectId = await storage.get('selectedProjectId');
-  const selectedProjectName = await storage.get('selectedProjectName');
+  const projectData = await chrome.storage.sync.get(['selectedProject']);
+  const selectedProject = projectData.selectedProject;
   const isRecording = await storage.get('isRecording') || false;
   showGazePoint = await storage.get('showGazePoint') || false;
 
@@ -188,7 +193,7 @@ async function createOverlay() {
     color: #1f2937 !important;
     font-weight: 500 !important;
   `;
-  projectName.textContent = selectedProjectName || 'No project selected';
+  projectName.textContent = selectedProject?.name || 'No project selected';
   
   // Add gaze tracking indicator
   const gazeIndicator = document.createElement('div');
@@ -209,10 +214,10 @@ async function createOverlay() {
 
   // Listen for project selection changes from storage
   chrome.storage.onChanged.addListener((changes, namespace) => {
-    if (changes.selectedProjectName) {
-      const newName = changes.selectedProjectName.newValue;
-      projectName.textContent = newName || 'No project selected';
-      console.log('Project indicator updated:', newName);
+    if (changes.selectedProject) {
+      const newProject = changes.selectedProject.newValue;
+      projectName.textContent = newProject?.name || 'No project selected';
+      console.log('Project indicator updated:', newProject?.name);
     }
   });
 
@@ -325,20 +330,38 @@ async function createOverlay() {
   recordButton.onclick = async () => {
     console.log('Record button clicked');
     
-    // Check if project is selected
-    const projectId = await storage.get('selectedProjectId');
-    const projectName = await storage.get('selectedProjectName');
-    
-    if (!projectId || !projectName) {
-      showAlert('Please select a project from the extension popup first', container);
+    try {
+      // Validate project selection before recording
+      const project = await validateProjectSelection();
+      console.log('✅ Project validated for recording:', project.name);
+    } catch (error) {
+      console.error('❌ Project validation failed:', error);
+      // Project selection modal will be shown by validateProjectSelection()
       return;
     }
     
+    // Get project info for recording
+    const projectData = await chrome.storage.sync.get(['selectedProject']);
+    const projectId = projectData.selectedProject?.id;
+    const projectName = projectData.selectedProject?.name;
+    
     // Check if eye tracker is connected and calibrated
-    const eyeTrackerStatus = await chrome.storage.local.get([
-      'eyeTrackerConnected', 
-      'eyeTrackerCalibrated'
-    ]);
+    // Get fresh status from background script to ensure accuracy
+    let eyeTrackerStatus;
+    try {
+      const statusResponse = await chrome.runtime.sendMessage({ type: 'EYE_TRACKER_STATUS' });
+      eyeTrackerStatus = {
+        eyeTrackerConnected: statusResponse.isConnected,
+        eyeTrackerCalibrated: statusResponse.isCalibrated
+      };
+      console.log('Fresh eye tracker status:', eyeTrackerStatus);
+    } catch (error) {
+      console.warn('Failed to get fresh status, falling back to storage:', error);
+      eyeTrackerStatus = await chrome.storage.local.get([
+        'eyeTrackerConnected', 
+        'eyeTrackerCalibrated'
+      ]);
+    }
     
     if (!eyeTrackerStatus.eyeTrackerConnected) {
       showAlert('Please connect eye tracker from the extension popup first', container);
@@ -373,6 +396,54 @@ async function createOverlay() {
       showAlert(`Recording started for project: ${projectName}`, container);
     } else {
       showAlert('Recording stopped', container);
+    }
+  };
+
+  // Create test connection button
+  const testButton = document.createElement('button');
+  testButton.title = 'Test Data-IO Connection';
+  testButton.style.cssText = `
+    width: 32px !important;
+    height: 32px !important;
+    border-radius: 50% !important;
+    background: #f3f4f6 !important;
+    border: none !important;
+    cursor: pointer !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    transition: all 0.2s ease !important;
+  `;
+
+  testButton.innerHTML = `
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2">
+      <path d="M9 12l2 2 4-4"></path>
+      <circle cx="12" cy="12" r="9"></circle>
+    </svg>
+  `;
+
+  testButton.onmouseover = () => {
+    testButton.style.background = '#e5e7eb';
+  };
+
+  testButton.onmouseout = () => {
+    testButton.style.background = '#f3f4f6';
+  };
+
+  testButton.onclick = async () => {
+    console.log('Test connection button clicked');
+    
+    try {
+      // Validate project selection before testing
+      const project = await validateProjectSelection();
+      console.log('✅ Project validated for testing:', project.name);
+      
+      // Use background script for testing (avoids CORS issues)
+      showConnectionTestFromBackground(project.id);
+      
+    } catch (error) {
+      console.error('❌ Project validation failed for testing:', error);
+      // Project selection modal will be shown by validateProjectSelection()
     }
   };
 
@@ -431,6 +502,7 @@ async function createOverlay() {
   // Assemble components
   controlsSection.appendChild(recordButton);
   controlsSection.appendChild(gazeToggleButton);
+  controlsSection.appendChild(testButton);
   controlsSection.appendChild(minimizeButton);
   
   panel.appendChild(projectSection);
@@ -555,30 +627,160 @@ async function finalizeRecording(projectId: string): Promise<void> {
     type: getSupportedMimeType() 
   })
 
-  const sessionData = {
-    id: `rec_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-    projectId,
-    startTime: recordingStartTime,
-    endTime: Date.now(),
-    gazeData: gazeDataBuffer,
-    metadata: {
+  const duration = Date.now() - recordingStartTime;
+  const sessionId = `${EYE_TRACKING_CONSTANTS.BROWSER_PLUGIN_PREFIX}${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  
+  console.log('Recording session completed:', {
+    sessionId,
+    duration: duration / 1000,
+    gazePoints: gazeDataBuffer.length,
+    videoSize: videoBlob.size
+  });
+
+  try {
+    // Create video file for upload
+    const videoFile = new File([videoBlob], `recording-${sessionId}.webm`, { 
+      type: getSupportedMimeType() 
+    });
+
+    // Create gaze data file for upload
+    const gazeDataFile = new File([JSON.stringify(gazeDataBuffer)], `gaze-data-${sessionId}.json`, { 
+      type: 'application/json' 
+    });
+
+    // Prepare metadata using the same structure as cogixAPIClient
+    const metadata: Partial<RecordingMetadata> = {
+      duration: duration / 1000,
+      screen_width: screen.width,
+      screen_height: screen.height,
+      device: 'browser-extension',
+      source: 'browser-extension',
+      gaze_points_count: gazeDataBuffer.length,
+      has_video: true,
+      has_gaze_file: true,
+      storage_type: 'edge_r2',
+      
+      // Browser-specific metadata
       url: window.location.href,
       title: document.title,
-      userAgent: navigator.userAgent,
-      screenResolution: {
+      user_agent: navigator.userAgent,
+      
+      // Recording settings
+      recording_settings: {
+        fps: EYE_TRACKING_CONSTANTS.DEFAULT_VIDEO_FPS,
+        resolution: '1280x720',
+        codec: getSupportedMimeType()
+      },
+      
+      // Eye tracking settings
+      eye_tracking_settings: {
+        sampling_rate: EYE_TRACKING_CONSTANTS.DEFAULT_SAMPLING_RATE,
+        tracker_model: 'hardware'
+      }
+    };
+
+    // Upload session using background script (avoids ALL CORS issues)
+    showUploadProgress({
+      stage: 'token',
+      progress: 5,
+      message: 'Preparing upload via background script...',
+      sessionId: sessionId
+    });
+
+    // Convert video blob to transferable format for background script
+    console.log('🔄 Converting video blob for background transfer...');
+    const videoArray = Array.from(new Uint8Array(await videoBlob.arrayBuffer()));
+    
+    console.log('📡 Sending upload request to background script:', {
+      sessionId,
+      projectId,
+      videoSize: videoArray.length,
+      gazePoints: gazeDataBuffer.length
+    });
+    
+    const result = await chrome.runtime.sendMessage({
+      type: 'DATA_IO_UPLOAD_SESSION',
+      projectId: projectId,
+      sessionId: sessionId,
+      videoBlob: videoArray, // Serializable Uint8Array
+      gazeData: gazeDataBuffer,
+      metadata: {
+        ...metadata,
+        url: window.location.href,
+        title: document.title
+      },
+      screenDimensions: {
         width: screen.width,
         height: screen.height
       }
+    });
+
+    if (!result.success) {
+      throw new Error(result.error || 'Background upload failed');
+    }
+
+    console.log('Complete session uploaded successfully:', result);
+    
+    // Show final completion message
+    showUploadProgress({
+      stage: 'complete',
+      progress: 100,
+      message: 'Upload completed successfully!',
+      sessionId: sessionId
+    });
+    
+  } catch (error) {
+    console.error('Failed to upload recording:', error);
+    
+    // Show error in progress UI with detailed error information
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    showUploadProgress({
+      stage: 'error',
+      progress: 0,
+      message: 'Upload failed',
+      sessionId: sessionId,
+      errorDetails: errorMessage
+    });
+    
+    // Store session locally for retry later (enhanced error recovery)
+    const failedSession = {
+      sessionId,
+      projectId,
+      videoBlob: Array.from(new Uint8Array(await videoBlob.arrayBuffer())), // Convert to serializable format
+      gazeData: gazeDataBuffer,
+      metadata: {
+        duration: duration / 1000,
+        url: window.location.href,
+        title: document.title,
+        userAgent: navigator.userAgent,
+        screenWidth: screen.width,
+        screenHeight: screen.height,
+        gazePointsCount: gazeDataBuffer.length,
+        videoSize: videoBlob.size,
+        codec: getSupportedMimeType()
+      },
+      uploadFailed: true,
+      error: errorMessage,
+      timestamp: Date.now(),
+      retryCount: 0
+    };
+    
+    // Store in local storage for retry
+    try {
+      const failedSessions = JSON.parse(localStorage.getItem('failedRecordings') || '[]');
+      failedSessions.push(failedSession);
+      
+      // Keep only the last 10 failed sessions to avoid storage bloat
+      if (failedSessions.length > 10) {
+        failedSessions.splice(0, failedSessions.length - 10);
+      }
+      
+      localStorage.setItem('failedRecordings', JSON.stringify(failedSessions));
+      console.log('Session stored locally for retry:', sessionId);
+    } catch (storageError) {
+      console.error('Failed to store session locally:', storageError);
     }
   }
-
-  // Save recording data (you might want to upload this to your backend)
-  console.log('Recording session completed:', sessionData)
-  console.log('Video blob size:', videoBlob.size, 'bytes')
-  console.log('Gaze data points:', gazeDataBuffer.length)
-
-  // For now, just log the data. In a real implementation, you would upload this
-  // to your backend API along with the video file
   
   // Clean up
   recordedChunks = []
@@ -602,6 +804,191 @@ function getSupportedMimeType(): string {
   }
   
   return 'video/webm' // Fallback
+}
+
+// Legacy functions removed - now using dataIOClient for consistent behavior
+
+// Legacy function - kept for backward compatibility
+async function uploadVideoToBackend(videoBlob: Blob, projectId: string): Promise<string> {
+  // Get authentication token
+  const authData = await chrome.storage.sync.get(['clerkToken']);
+  const token = authData.clerkToken;
+  
+  if (!token) {
+    throw new Error('Not authenticated. Please sign in to the extension.');
+  }
+
+  // Create form data
+  const formData = new FormData();
+  const filename = `recording_${Date.now()}.webm`;
+  formData.append('file', videoBlob, filename);
+  formData.append('folder_path', 'recordings');
+  formData.append('overwrite', 'true');
+
+  // Upload to backend
+  const API_BASE_URL = 'https://api.cogix.app';
+  const uploadUrl = `${API_BASE_URL}/api/v1/project-files/${projectId}/upload`;
+  
+  console.log('Uploading video to:', uploadUrl);
+  
+  const response = await fetch(uploadUrl, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`
+    },
+    body: formData
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error('Upload response error:', response.status, errorText);
+    throw new Error(`Upload failed: ${response.status} ${response.statusText}`);
+  }
+
+  const result = await response.json();
+  console.log('Upload result:', result);
+  
+  // Return the signed URL or file path that can be used to access the video
+  return result.signed_url || result.file_path || result.url;
+}
+
+// Get or create API key for data-io submissions
+async function getDataIOApiKey(projectId: string): Promise<string> {
+  // Check if we have a cached API key
+  const cacheKey = `dataio_api_key_${projectId}`;
+  const cachedKey = localStorage.getItem(cacheKey);
+  
+  if (cachedKey) {
+    console.log('Using cached API key for project:', projectId);
+    return cachedKey;
+  }
+
+  // Get fresh API key from backend
+  const authData = await chrome.storage.sync.get(['clerkToken']);
+  const token = authData.clerkToken;
+  
+  if (!token) {
+    throw new Error('Not authenticated. Please sign in to the extension.');
+  }
+
+  const API_BASE_URL = 'https://api.cogix.app';
+  const apiKeyUrl = `${API_BASE_URL}/api/v1/projects/${projectId}/default-api-key`;
+  
+  console.log('Getting API key from:', apiKeyUrl);
+  
+  const response = await fetch(apiKeyUrl, {
+    method: 'GET',
+    headers: {
+      'Authorization': `Bearer ${token}`
+    }
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error('API key request error:', response.status, errorText);
+    throw new Error(`Failed to get API key: ${response.status} ${response.statusText}`);
+  }
+
+  const result = await response.json();
+  console.log('API key result:', result);
+  
+  // Extract the API key from the response
+  let apiKey = result.api_key || result.encrypted_key;
+  
+  if (!apiKey) {
+    throw new Error('No API key returned from backend');
+  }
+
+  // Cache the key for future use (with expiration)
+  localStorage.setItem(cacheKey, apiKey);
+  localStorage.setItem(`${cacheKey}_expires`, (Date.now() + 24 * 60 * 60 * 1000).toString()); // 24 hours
+  
+  return apiKey;
+}
+
+// Submit session data to cogix-data-io (simplified with Clerk auth)
+async function submitSessionToDataIO(sessionData: any, projectId: string): Promise<void> {
+  // Get authentication token
+  const authData = await chrome.storage.sync.get(['clerkToken', 'clerkUser']);
+  const token = authData.clerkToken;
+  const user = authData.clerkUser;
+  
+  if (!token || !user) {
+    throw new Error('Not authenticated. Please sign in to the extension.');
+  }
+
+  // Use Clerk user ID directly (data-io now handles Clerk auth)
+  const DATA_IO_URL = 'https://data-io.cogix.app';
+  const userId = user.id; // Clerk user ID
+  const participantId = 'browser-extension'; // Could be made configurable
+  const sessionId = sessionData.id;
+  
+  // Build submission URL using Clerk user ID
+  const submitUrl = `${DATA_IO_URL}/${userId}/${projectId}/${participantId}/${sessionId}`;
+  
+  console.log('Submitting session data to:', submitUrl);
+  
+  // Prepare submission payload
+  const submissionPayload = {
+    data: sessionData,
+    metadata: {
+      device: 'browser-extension',
+      version: chrome.runtime.getManifest().version,
+      submitted_at: new Date().toISOString(),
+      eyeTrackerType: 'hardware', // Could be detected from actual tracker type
+      browser: navigator.userAgent
+    }
+  };
+  
+  const response = await fetch(submitUrl, {
+    method: 'PUT',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(submissionPayload)
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error('Data-IO submission error:', response.status, errorText);
+    
+    // If it's an auth error, clear cached API key and retry once
+    if (response.status === 401 || response.status === 403) {
+      console.log('Auth error, clearing cached API key and retrying...');
+      const cacheKey = `dataio_api_key_${projectId}`;
+      localStorage.removeItem(cacheKey);
+      localStorage.removeItem(`${cacheKey}_expires`);
+      
+      // Retry with fresh Clerk token
+      const freshAuthData = await chrome.storage.sync.get(['clerkToken']);
+      const freshToken = freshAuthData.clerkToken;
+      
+      const retryResponse = await fetch(submitUrl, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${freshToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(submissionPayload)
+      });
+      
+      if (!retryResponse.ok) {
+        const retryErrorText = await retryResponse.text();
+        console.error('Retry submission error:', retryResponse.status, retryErrorText);
+        throw new Error(`Data submission failed after retry: ${retryResponse.status} ${retryResponse.statusText}`);
+      }
+      
+      const retryResult = await retryResponse.json();
+      console.log('Data-IO retry submission result:', retryResult);
+      return;
+    }
+    
+    throw new Error(`Data submission failed: ${response.status} ${response.statusText}`);
+  }
+
+  const result = await response.json();
+  console.log('Data-IO submission result:', result);
 }
 
 function showRecordingIndicator(): void {
@@ -931,6 +1318,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse({ success: true, location: window.location.href })
       break
       
+    case 'TEST_CONNECTION':
+      // Test data-io connection
+      console.log('Testing data-io connection from content script')
+      chrome.storage.sync.get(['selectedProject']).then(projectData => {
+        const projectId = projectData.selectedProject?.id
+        showConnectionTest(projectId)
+        sendResponse({ success: true })
+      })
+      return true // Keep message channel open for async response
+      break
+      
     case 'STOP_CALIBRATION':
       stopCalibration()
       sendResponse({ success: true })
@@ -993,9 +1391,74 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           timestamp: message.data.timestamp - recordingStartTime, // Relative to recording start
           x: message.data.x,
           y: message.data.y,
-          leftEye: message.data.leftEye,
-          rightEye: message.data.rightEye
+          confidence: message.data.confidence || 0.8
         })
+      }
+      break
+
+    case 'UPLOAD_PROGRESS':
+      // Handle progress updates from background script
+      const { stage, progress, details } = message;
+      console.log('📊 Upload progress update:', { stage, progress });
+      
+      showUploadProgress({
+        stage: stage.includes('video') ? 'video_upload' :
+               stage.includes('gaze') ? 'gaze_upload' :
+               stage.includes('token') || stage.includes('auth') ? 'token' :
+               stage.includes('submit') || stage.includes('session') ? 'session_submit' :
+               stage.includes('complet') ? 'complete' : 'video_upload',
+        progress: Math.round(progress),
+        message: stage,
+        sessionId: message.sessionId,
+        videoProgress: details?.videoProgress,
+        gazeProgress: details?.gazeProgress
+      });
+      break
+
+    case 'PROJECT_SELECTED':
+      // Handle immediate project selection from popup (no storage delay)
+      const { project } = message;
+      console.log('📡 Received immediate project selection:', project?.name);
+      
+      if (project) {
+        // Update project display immediately
+        const projectNameElement = document.querySelector('#cogix-unified-overlay .project-name');
+        if (projectNameElement) {
+          projectNameElement.textContent = project.name;
+        }
+        
+        // Show success notification
+        const successNotification = document.createElement('div');
+        successNotification.style.cssText = `
+          position: fixed !important;
+          bottom: 20px !important;
+          right: 20px !important;
+          background: linear-gradient(135deg, #10b981 0%, #059669 100%) !important;
+          color: white !important;
+          padding: 12px 16px !important;
+          border-radius: 8px !important;
+          font-family: -apple-system, BlinkMacSystemFont, sans-serif !important;
+          font-size: 14px !important;
+          z-index: 2147483647 !important;
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3) !important;
+          animation: slideInFromBottom 0.3s ease-out !important;
+        `;
+        
+        successNotification.innerHTML = `
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <div style="font-size: 16px;">✅</div>
+            <div>Project: ${project.name}</div>
+          </div>
+        `;
+        
+        document.body.appendChild(successNotification);
+        
+        // Auto-dismiss
+        setTimeout(() => {
+          if (document.body.contains(successNotification)) {
+            successNotification.remove();
+          }
+        }, 3000);
       }
       break
       
