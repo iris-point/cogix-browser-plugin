@@ -7,6 +7,8 @@
   "scripts": {
     "dev": "set NODE_NO_WARNINGS=1 && plasmo dev",
     "build": "set NODE_NO_WARNINGS=1 && plasmo build",
+    "build:zip": "node scripts/build-zip.js",
+    "build:quick": "npm run build && npm run package && echo Extension packaged as build/chrome-mv3-prod.zip",
     "package": "set NODE_NO_WARNINGS=1 && plasmo package",
     "package:crx": "powershell -ExecutionPolicy Bypass -File create-crx.ps1",
     "package:all": "npm run build && npm run package && npm run package:crx",
