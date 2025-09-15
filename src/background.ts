@@ -1,6 +1,7 @@
 import { debugLog } from './utils/debug'
 import { EyeTrackerManager } from './lib/eye-tracker-manager'
 import { backgroundDataIOClient } from './lib/backgroundDataIOClient'
+import { eyeTrackerState } from './lib/eyeTrackerState'
 
 // Log when background script starts
 debugLog('BACKGROUND', 'Background script initialized');
@@ -216,10 +217,61 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     case 'REQUEST_SCREEN_CAPTURE':
       // Handle screen capture request
       const { sources } = request;
-      chrome.desktopCapture.chooseDesktopMedia(sources || ['screen', 'window', 'tab'], (streamId) => {
-        debugLog('BACKGROUND', 'Screen capture response', { streamId: !!streamId });
-        sendResponse({ streamId: streamId || null });
-      });
+      debugLog('BACKGROUND', 'Screen capture request received', { sources, tabId: sender.tab?.id });
+      
+      // For Chrome extensions, we need to pass the tab ID for proper permission dialog
+      // If no tab ID (e.g., from popup), use chrome.tabs API
+      if (sender.tab?.id) {
+        // Request from content script - use the sender's tab
+        chrome.desktopCapture.chooseDesktopMedia(
+          sources || ['screen', 'window', 'tab'],
+          sender.tab,
+          (streamId) => {
+            debugLog('BACKGROUND', 'Screen capture response', { 
+              streamId: !!streamId,
+              streamIdValue: streamId 
+            });
+            
+            if (streamId) {
+              // Store the streamId temporarily for verification
+              chrome.storage.local.set({ 
+                lastStreamId: streamId,
+                lastStreamTimestamp: Date.now() 
+              });
+            }
+            
+            sendResponse({ 
+              streamId: streamId || null,
+              success: !!streamId 
+            });
+          }
+        );
+      } else {
+        // Request from popup or background - get active tab
+        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+          if (tabs.length > 0) {
+            chrome.desktopCapture.chooseDesktopMedia(
+              sources || ['screen', 'window', 'tab'],
+              tabs[0],
+              (streamId) => {
+                debugLog('BACKGROUND', 'Screen capture response (from popup)', { 
+                  streamId: !!streamId 
+                });
+                sendResponse({ 
+                  streamId: streamId || null,
+                  success: !!streamId 
+                });
+              }
+            );
+          } else {
+            sendResponse({ 
+              streamId: null,
+              success: false,
+              error: 'No active tab found' 
+            });
+          }
+        });
+      }
       return true;
       
     case 'EYE_TRACKER_CONNECT':
@@ -239,55 +291,27 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     case 'EYE_TRACKER_DISCONNECT':
       // Disconnect eye tracker
       debugLog('BACKGROUND', 'Disconnecting eye tracker');
-      eyeTrackerManager.disconnect();
-      sendResponse({ success: true });
+      (async () => {
+        await eyeTrackerManager.disconnect();
+        sendResponse({ success: true });
+      })();
       return true;
       
     case 'EYE_TRACKER_STATUS':
-      // Always check storage first to get the most accurate state
-      // This handles cases where the background script was restarted
-      chrome.storage.local.get([
-        'eyeTrackerStatus',
-        'eyeTrackerConnected', 
-        'eyeTrackerCalibrated',
-        'eyeTrackerTracking'
-      ], (storageResult) => {
-        // Get current in-memory state
-        const status = eyeTrackerManager.getStatus()
-        const isConnected = eyeTrackerManager.isTrackerConnected()
-        let isCalibrated = eyeTrackerManager.isCalibrationComplete()
-        const isTracking = eyeTrackerManager.isCurrentlyTracking()
+      // Get state from centralized state manager
+      (async () => {
+        const state = await eyeTrackerState.getStateAsync()
+        console.log('EYE_TRACKER_STATUS response from centralized state:', state)
         
-        // If storage has calibration but in-memory doesn't, restore it
-        // This handles background script restarts
-        if (storageResult.eyeTrackerCalibrated === true && !isCalibrated && isConnected) {
-          console.log('Restoring calibration state from storage')
-          isCalibrated = true
-          eyeTrackerManager.setCalibrationState(true)
-        }
-        
-        // Build final status - prefer in-memory if available, fall back to storage
-        // But only use storage calibration if we're actually connected
-        const finalStatus = {
-          status: status,
-          isConnected: isConnected,
-          isCalibrated: isConnected ? (isCalibrated || storageResult.eyeTrackerCalibrated === true) : false,
-          isTracking: isTracking
-        }
-        
-        console.log('EYE_TRACKER_STATUS response:', finalStatus)
-        
-        // Update storage with current state
-        chrome.storage.local.set({
-          eyeTrackerStatus: finalStatus.status,
-          eyeTrackerConnected: finalStatus.isConnected,
-          eyeTrackerCalibrated: finalStatus.isCalibrated,
-          eyeTrackerTracking: finalStatus.isTracking,
-          eyeTrackerLastUpdate: Date.now()
+        sendResponse({
+          status: state.status,
+          isConnected: state.isConnected,
+          isCalibrated: state.isCalibrated,
+          isTracking: state.isTracking,
+          canRecord: state.canRecord,
+          displayStatus: state.displayStatus
         })
-        
-        sendResponse(finalStatus)
-      })
+      })()
       return true; // Will respond asynchronously
       
     case 'EYE_TRACKER_SET_URL':
@@ -319,13 +343,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     case 'STOP_EYE_TRACKER_CALIBRATION':
       // Stop/cancel calibration
       debugLog('BACKGROUND', 'Stopping eye tracker calibration');
-      try {
-        eyeTrackerManager.cancelCalibration();
-        sendResponse({ success: true });
-      } catch (error: any) {
-        debugLog('BACKGROUND', 'Failed to stop calibration', { error: error.message });
-        sendResponse({ success: false, error: error.message });
-      }
+      (async () => {
+        try {
+          await eyeTrackerManager.cancelCalibration();
+          sendResponse({ success: true });
+        } catch (error: any) {
+          debugLog('BACKGROUND', 'Failed to stop calibration', { error: error.message });
+          sendResponse({ success: false, error: error.message });
+        }
+      })();
       return true;
 
     case 'DATA_IO_TEST_CONNECTION':

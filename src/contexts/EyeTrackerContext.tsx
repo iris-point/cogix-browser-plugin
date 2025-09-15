@@ -4,6 +4,7 @@ import {
   type GazeData, 
   type CalibrationResult
 } from '@iris-point/eye-tracking-core'
+import { eyeTrackerState } from '../lib/eyeTrackerState'
 
 // Eye tracking now managed by background script for persistence
 
@@ -187,6 +188,28 @@ export const EyeTrackerProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     // Poll for status updates every 1 second to keep popup in sync
     const statusInterval = setInterval(updateStatus, 1000)
     
+    // Subscribe to centralized state changes for immediate updates
+    let unsubscribe: (() => void) | null = null
+    
+    try {
+      // Use the lazy-initialized state manager
+      unsubscribe = eyeTrackerState.subscribe((state) => {
+        console.log('EyeTrackerContext: State changed:', state)
+        setDeviceStatus(state.status)
+        setIsCalibrated(state.isCalibrated)
+        setIsTracking(state.isTracking)
+        
+        // Start/stop camera polling based on connection
+        if ([DeviceStatus.CONNECTED, DeviceStatus.CALIBRATING, DeviceStatus.TRACKING].includes(state.status)) {
+          startCameraPolling()
+        } else {
+          stopCameraPolling()
+        }
+      })
+    } catch (error) {
+      console.warn('Failed to subscribe to eyeTrackerState:', error, 'Falling back to storage polling only')
+    }
+    
     // Poll for camera frames every 100ms when connected (10 FPS for popup)
     let cameraInterval: NodeJS.Timeout | null = null
     
@@ -258,6 +281,9 @@ export const EyeTrackerProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       chrome.runtime.onMessage.removeListener(handleMessage)
       chrome.storage.onChanged.removeListener(handleStorageChange)
       clearInterval(statusInterval)
+      if (unsubscribe) {
+        unsubscribe()
+      }
       stopCameraPolling()
     }
   }, [wsUrl])

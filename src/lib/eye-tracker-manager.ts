@@ -10,6 +10,7 @@ import {
   type GazeData, 
   type CalibrationResult
 } from '@iris-point/eye-tracking-core'
+import { eyeTrackerState } from './eyeTrackerState'
 
 export class EyeTrackerManager {
   private static instance: EyeTrackerManager | null = null
@@ -33,30 +34,19 @@ export class EyeTrackerManager {
     return EyeTrackerManager.instance
   }
 
-  private restoreStateFromStorage() {
-    // Restore state from storage when background script restarts
-    chrome.storage.local.get([
-      'eyeTrackerConnected',
-      'eyeTrackerCalibrated',
-      'eyeTrackerTracking',
-      'eyeTrackerStatus'
-    ], (result) => {
-      console.log('[EyeTrackerManager] Restoring state from storage:', result)
-      
-      if (result.eyeTrackerConnected === true) {
-        this.isConnected = true
-      }
-      if (result.eyeTrackerCalibrated === true) {
-        this.isCalibrated = true
-        console.log('[EyeTrackerManager] Restored calibration state: true')
-      }
-      if (result.eyeTrackerTracking === true) {
-        this.isTracking = true
-      }
-      if (result.eyeTrackerStatus) {
-        this.deviceStatus = result.eyeTrackerStatus
-      }
-    })
+  private async restoreStateFromStorage() {
+    // Restore state from centralized state manager
+    const state = await eyeTrackerState.getStateAsync()
+    console.log('[EyeTrackerManager] Restoring state from centralized storage:', state)
+    
+    this.isConnected = state.isConnected
+    this.isCalibrated = state.isCalibrated
+    this.isTracking = state.isTracking
+    this.deviceStatus = state.status
+    
+    if (state.isCalibrated) {
+      console.log('[EyeTrackerManager] Restored calibration state: true')
+    }
   }
 
   private initializeTracker() {
@@ -72,26 +62,25 @@ export class EyeTrackerManager {
 
     // Set up event listeners
     if (this.tracker && typeof this.tracker.on === 'function') {
-      this.tracker.on('statusChanged', (status: DeviceStatus) => {
+      this.tracker.on('statusChanged', async (status: DeviceStatus) => {
         console.log('Persistent eye tracker status:', status)
         this.deviceStatus = status
         this.isConnected = status === DeviceStatus.CONNECTED
+        
+        // Update centralized state
+        await eyeTrackerState.setStatus(status)
         
         // Broadcast status to all tabs and popup
         this.broadcastStatus()
       })
 
-      this.tracker.on('connected', () => {
+      this.tracker.on('connected', async () => {
         console.log('Persistent eye tracker connected - initializing...')
         this.isConnected = true
         this.deviceStatus = DeviceStatus.CONNECTED
         
-        // Update storage for single source of truth
-        chrome.storage.local.set({
-          eyeTrackerConnected: true,
-          eyeTrackerStatus: DeviceStatus.CONNECTED,
-          eyeTrackerLastUpdate: Date.now()
-        })
+        // Update centralized state
+        await eyeTrackerState.setConnected(true, DeviceStatus.CONNECTED)
         
         this.broadcastStatus() // Ensure status is broadcast immediately
         
@@ -107,21 +96,15 @@ export class EyeTrackerManager {
         }, 100)
       })
       
-      this.tracker.on('disconnected', () => {
+      this.tracker.on('disconnected', async () => {
         console.log('Persistent eye tracker disconnected')
         this.isConnected = false
         this.isCalibrated = false
         this.isTracking = false
         this.deviceStatus = DeviceStatus.DISCONNECTED
         
-        // Update storage for single source of truth
-        chrome.storage.local.set({
-          eyeTrackerConnected: false,
-          eyeTrackerCalibrated: false,
-          eyeTrackerTracking: false,
-          eyeTrackerStatus: DeviceStatus.DISCONNECTED,
-          eyeTrackerLastUpdate: Date.now()
-        })
+        // Update centralized state - this will reset calibration too
+        await eyeTrackerState.setConnected(false)
         
         this.broadcastStatus() // Ensure status is broadcast immediately
       })
@@ -131,10 +114,22 @@ export class EyeTrackerManager {
         this.broadcastGazeData(data)
       })
 
-      this.tracker.on('calibrationStarted', (data: { points: number }) => {
+      this.tracker.on('calibrationStarted', async (data: { points: number }) => {
         console.log('Calibration started:', data)
         this.deviceStatus = DeviceStatus.CALIBRATING
+        
+        // Update centralized state
+        await eyeTrackerState.setStatus(DeviceStatus.CALIBRATING)
+        
         this.broadcastStatus()
+        
+        // Broadcast the first calibration point
+        this.broadcastCalibrationPoint({
+          x: 0.1,
+          y: 0.1,
+          index: 0,
+          total: data.points || 5
+        })
       })
       
       this.tracker.on('calibrationProgress', (progress: any) => {
@@ -142,38 +137,53 @@ export class EyeTrackerManager {
         // The HHProvider sends nFinishedNum in the progress data
         // We need to extract and forward it properly
         const currentPoint = progress.nFinishedNum || progress.current || progress.point
+        
+        // Calibration points are predefined in the library
+        const calibrationPoints = [
+          { x: 0.1, y: 0.1 },  // Top-left
+          { x: 0.9, y: 0.1 },  // Top-right
+          { x: 0.5, y: 0.5 },  // Center
+          { x: 0.1, y: 0.9 },  // Bottom-left
+          { x: 0.9, y: 0.9 }   // Bottom-right
+        ]
+        
+        // Broadcast calibration progress
         this.broadcastCalibrationProgress({
           current: currentPoint,
           total: progress.total || 5,
           nFinishedNum: progress.nFinishedNum
         })
+        
+        // Broadcast the current calibration point to show
+        if (currentPoint >= 0 && currentPoint < calibrationPoints.length) {
+          this.broadcastCalibrationPoint({
+            x: calibrationPoints[currentPoint].x,
+            y: calibrationPoints[currentPoint].y,
+            index: currentPoint,
+            total: calibrationPoints.length
+          })
+        }
       })
 
-      this.tracker.on('calibrationComplete', (result: CalibrationResult) => {
+      this.tracker.on('calibrationComplete', async (result: CalibrationResult) => {
         console.log('[EyeTrackerManager] Calibration complete event received:', result)
         this.isCalibrated = true
         console.log('[EyeTrackerManager] Setting isCalibrated to true')
         
-        // Update storage for single source of truth
-        chrome.storage.local.set({
-          eyeTrackerCalibrated: true,
-          calibrationTimestamp: Date.now(),
-          calibrationResult: result
-        }, () => {
-          console.log('[EyeTrackerManager] Calibration state saved to storage')
-        })
+        // Update centralized state - this will also set tracking
+        await eyeTrackerState.setCalibrated(true)
         
         // Start tracking automatically after calibration
         if (this.tracker) {
+          console.log('[EyeTrackerManager] Starting tracking after calibration...')
           this.tracker.startTracking()
           this.deviceStatus = DeviceStatus.TRACKING
           this.isTracking = true
+          console.log('[EyeTrackerManager] Tracking started successfully')
           
-          // Update storage with tracking state
-          chrome.storage.local.set({
-            eyeTrackerTracking: true,
-            eyeTrackerStatus: DeviceStatus.TRACKING
-          })
+          // Update centralized state
+          await eyeTrackerState.setTracking(true)
+          await eyeTrackerState.setStatus(DeviceStatus.TRACKING)
         }
         
         this.broadcastStatus() // Update status with calibration info
@@ -202,7 +212,7 @@ export class EyeTrackerManager {
     }
   }
 
-  disconnect(): void {
+  async disconnect(): Promise<void> {
     if (this.tracker) {
       this.tracker.disconnect()
       console.log('Persistent eye tracker disconnected')
@@ -215,12 +225,8 @@ export class EyeTrackerManager {
     this.deviceStatus = DeviceStatus.DISCONNECTED
     this.latestCameraFrame = null
     
-    // Clear storage state as well
-    chrome.storage.local.set({
-      eyeTrackerConnected: false,
-      eyeTrackerCalibrated: false,
-      eyeTrackerTracking: false
-    })
+    // Update centralized state - this will handle all state resets
+    await eyeTrackerState.setConnected(false)
     
     // Broadcast the disconnected status
     this.broadcastStatus()
@@ -234,7 +240,7 @@ export class EyeTrackerManager {
     }
   }
 
-  cancelCalibration(): void {
+  async cancelCalibration(): Promise<void> {
     if (this.tracker) {
       // Call the tracker's stopCalibration method (not cancelCalibration)
       // This will properly reset the tracker's calibration state and emit 'calibrationCancelled'
@@ -249,12 +255,9 @@ export class EyeTrackerManager {
       this.isCalibrated = false
       this.deviceStatus = DeviceStatus.CONNECTED
       
-      // Update storage
-      chrome.storage.local.set({
-        eyeTrackerCalibrated: false,
-        eyeTrackerStatus: DeviceStatus.CONNECTED,
-        eyeTrackerLastUpdate: Date.now()
-      })
+      // Update centralized state
+      await eyeTrackerState.setCalibrated(false)
+      await eyeTrackerState.setStatus(DeviceStatus.CONNECTED)
       
       // Broadcast the status change
       this.broadcastStatus()
@@ -358,6 +361,21 @@ export class EyeTrackerManager {
             type: 'CALIBRATION_PROGRESS',
             current: progress.nFinishedNum || progress.current,
             total: progress.total
+          }).catch(() => {
+            // Ignore errors
+          })
+        }
+      })
+    })
+  }
+  
+  private broadcastCalibrationPoint(point: { x: number; y: number; index: number; total: number }): void {
+    chrome.tabs.query({}, (tabs) => {
+      tabs.forEach(tab => {
+        if (tab.id) {
+          chrome.tabs.sendMessage(tab.id, {
+            type: 'CALIBRATION_POINT',
+            point
           }).catch(() => {
             // Ignore errors
           })
