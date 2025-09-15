@@ -244,56 +244,51 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return true;
       
     case 'EYE_TRACKER_STATUS':
-      // Get comprehensive eye tracker status and save to storage for popup sync
-      const status = eyeTrackerManager.getStatus()
-      const isConnected = eyeTrackerManager.isTrackerConnected()
-      let isCalibrated = eyeTrackerManager.isCalibrationComplete()
-      const isTracking = eyeTrackerManager.isCurrentlyTracking()
-      
-      // If not calibrated in memory but connected, check storage as it might not be restored yet
-      if (!isCalibrated && isConnected) {
-        chrome.storage.local.get(['eyeTrackerCalibrated'], (result) => {
-          if (result.eyeTrackerCalibrated === true) {
-            isCalibrated = true
-            // Update the manager's flag too
-            eyeTrackerManager.setCalibrationState(true)
-          }
-          
-          // Save to storage for popup to read
-          chrome.storage.local.set({
-            eyeTrackerStatus: status,
-            eyeTrackerConnected: isConnected,
-            eyeTrackerCalibrated: isCalibrated,
-            eyeTrackerTracking: isTracking,
-            eyeTrackerLastUpdate: Date.now()
-          })
-          
-          sendResponse({
-            status: status,
-            isConnected: isConnected,
-            isCalibrated: isCalibrated,
-            isTracking: isTracking
-          });
+      // Always check storage first to get the most accurate state
+      // This handles cases where the background script was restarted
+      chrome.storage.local.get([
+        'eyeTrackerStatus',
+        'eyeTrackerConnected', 
+        'eyeTrackerCalibrated',
+        'eyeTrackerTracking'
+      ], (storageResult) => {
+        // Get current in-memory state
+        const status = eyeTrackerManager.getStatus()
+        const isConnected = eyeTrackerManager.isTrackerConnected()
+        let isCalibrated = eyeTrackerManager.isCalibrationComplete()
+        const isTracking = eyeTrackerManager.isCurrentlyTracking()
+        
+        // If storage has calibration but in-memory doesn't, restore it
+        // This handles background script restarts
+        if (storageResult.eyeTrackerCalibrated === true && !isCalibrated && isConnected) {
+          console.log('Restoring calibration state from storage')
+          isCalibrated = true
+          eyeTrackerManager.setCalibrationState(true)
+        }
+        
+        // Build final status - prefer in-memory if available, fall back to storage
+        // But only use storage calibration if we're actually connected
+        const finalStatus = {
+          status: status,
+          isConnected: isConnected,
+          isCalibrated: isConnected ? (isCalibrated || storageResult.eyeTrackerCalibrated === true) : false,
+          isTracking: isTracking
+        }
+        
+        console.log('EYE_TRACKER_STATUS response:', finalStatus)
+        
+        // Update storage with current state
+        chrome.storage.local.set({
+          eyeTrackerStatus: finalStatus.status,
+          eyeTrackerConnected: finalStatus.isConnected,
+          eyeTrackerCalibrated: finalStatus.isCalibrated,
+          eyeTrackerTracking: finalStatus.isTracking,
+          eyeTrackerLastUpdate: Date.now()
         })
-        return true; // Will respond asynchronously
-      }
-      
-      // Save to storage for popup to read
-      chrome.storage.local.set({
-        eyeTrackerStatus: status,
-        eyeTrackerConnected: isConnected,
-        eyeTrackerCalibrated: isCalibrated,
-        eyeTrackerTracking: isTracking,
-        eyeTrackerLastUpdate: Date.now()
+        
+        sendResponse(finalStatus)
       })
-      
-      sendResponse({
-        status: status,
-        isConnected: isConnected,
-        isCalibrated: isCalibrated,
-        isTracking: isTracking
-      });
-      return true;
+      return true; // Will respond asynchronously
       
     case 'EYE_TRACKER_SET_URL':
       // Set WebSocket URL

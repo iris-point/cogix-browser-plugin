@@ -21,6 +21,10 @@ export const EyeTrackingPage = () => {
   
   const imgRef = useRef<HTMLImageElement>(null)
   
+  // Consider device calibrated if either isCalibrated is true OR device is in TRACKING state
+  // (TRACKING state means it's already calibrated and actively tracking)
+  const isEffectivelyCalibrated = isCalibrated || deviceStatus === DeviceStatus.TRACKING || isTracking
+  
   // Set up camera image when connected
   useEffect(() => {
     if (imgRef.current && deviceStatus === DeviceStatus.CONNECTED) {
@@ -182,12 +186,12 @@ export const EyeTrackingPage = () => {
           {/* Enhanced status indicators - show regardless of connection status */}
           <div className="plasmo-flex plasmo-flex-wrap plasmo-gap-2 plasmo-mb-2">
             <span className={`plasmo-inline-flex plasmo-items-center plasmo-px-2 plasmo-py-1 plasmo-rounded-full plasmo-text-xs plasmo-font-medium ${
-              isCalibrated ? 'plasmo-bg-green-100 plasmo-text-green-700' : 'plasmo-bg-yellow-100 plasmo-text-yellow-700'
+              isEffectivelyCalibrated ? 'plasmo-bg-green-100 plasmo-text-green-700' : 'plasmo-bg-yellow-100 plasmo-text-yellow-700'
             }`}>
               <div className={`plasmo-w-1.5 plasmo-h-1.5 plasmo-rounded-full plasmo-mr-1 ${
-                isCalibrated ? 'plasmo-bg-green-500' : 'plasmo-bg-yellow-500'
+                isEffectivelyCalibrated ? 'plasmo-bg-green-500' : 'plasmo-bg-yellow-500'
               }`}></div>
-              {isCalibrated ? 'Calibrated' : 'Not Calibrated'}
+              {isEffectivelyCalibrated ? 'Calibrated' : 'Not Calibrated'}
             </span>
             
             <span className={`plasmo-inline-flex plasmo-items-center plasmo-px-2 plasmo-py-1 plasmo-rounded-full plasmo-text-xs plasmo-font-medium ${
@@ -200,7 +204,7 @@ export const EyeTrackingPage = () => {
             </span>
           </div>
           
-          {(deviceStatus === DeviceStatus.CONNECTED || deviceStatus === DeviceStatus.TRACKING || isCalibrated || isTracking) && (
+          {(deviceStatus === DeviceStatus.CONNECTED || deviceStatus === DeviceStatus.TRACKING || isEffectivelyCalibrated || isTracking) && (
             <button
               onClick={handleDisconnect}
               className="plasmo-inline-flex plasmo-items-center plasmo-px-3 plasmo-py-1 plasmo-bg-red-100 plasmo-text-red-700 plasmo-rounded-md plasmo-text-xs plasmo-font-medium hover:plasmo-bg-red-200 plasmo-transition-colors"
@@ -252,7 +256,7 @@ export const EyeTrackingPage = () => {
         <h3 className="plasmo-text-sm plasmo-font-semibold plasmo-mb-2">Calibration</h3>
         
         {/* Calibration Status */}
-        {isCalibrated ? (
+        {isEffectivelyCalibrated ? (
           <div className="plasmo-mb-3 plasmo-p-2 plasmo-bg-green-50 plasmo-border plasmo-border-green-200 plasmo-rounded plasmo-text-sm">
             <div className="plasmo-text-green-800 plasmo-flex plasmo-items-center">
               <svg className="plasmo-w-4 plasmo-h-4 plasmo-mr-2" fill="currentColor" viewBox="0 0 20 20">
@@ -274,12 +278,12 @@ export const EyeTrackingPage = () => {
           onClick={handleStartCalibration}
           disabled={deviceStatus !== DeviceStatus.CONNECTED || isCalibrating}
           className={`plasmo-w-full plasmo-px-4 plasmo-py-2 plasmo-text-white plasmo-rounded-md plasmo-text-sm plasmo-font-medium disabled:plasmo-opacity-50 disabled:plasmo-cursor-not-allowed ${
-            isCalibrated 
+            isEffectivelyCalibrated 
               ? 'plasmo-bg-green-600 hover:plasmo-bg-green-700' 
               : 'plasmo-bg-purple-600 hover:plasmo-bg-purple-700'
           }`}
         >
-          {isCalibrating ? 'Calibrating...' : isCalibrated ? 'Recalibrate' : 'Start Calibration'}
+          {isCalibrating ? 'Calibrating...' : isEffectivelyCalibrated ? 'Recalibrate' : 'Start Calibration'}
         </button>
       </div>
       

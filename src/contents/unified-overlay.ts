@@ -378,12 +378,13 @@ async function createOverlay() {
       return;
     }
     
-    if (!eyeTrackerStatus.eyeTrackerCalibrated) {
+    // Check if calibrated OR in tracking state (tracking means already calibrated)
+    if (!eyeTrackerStatus.eyeTrackerCalibrated && !eyeTrackerStatus.isTracking) {
       showAlert('Please calibrate the eye tracker before recording.\nClick the Calibrate button in the extension popup.', container);
       return;
     }
     
-    console.log('Eye tracker is connected and calibrated, ready to record');
+    console.log('Eye tracker is ready to record (calibrated or tracking)');
     
     const currentlyRecording = await storage.get('isRecording') || false;
     const newRecordingState = !currentlyRecording;

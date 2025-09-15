@@ -34,10 +34,27 @@ export class EyeTrackerManager {
   }
 
   private restoreStateFromStorage() {
-    // Restore calibration state from storage when background script restarts
-    chrome.storage.local.get(['eyeTrackerCalibrated'], (result) => {
+    // Restore state from storage when background script restarts
+    chrome.storage.local.get([
+      'eyeTrackerConnected',
+      'eyeTrackerCalibrated',
+      'eyeTrackerTracking',
+      'eyeTrackerStatus'
+    ], (result) => {
+      console.log('[EyeTrackerManager] Restoring state from storage:', result)
+      
+      if (result.eyeTrackerConnected === true) {
+        this.isConnected = true
+      }
       if (result.eyeTrackerCalibrated === true) {
         this.isCalibrated = true
+        console.log('[EyeTrackerManager] Restored calibration state: true')
+      }
+      if (result.eyeTrackerTracking === true) {
+        this.isTracking = true
+      }
+      if (result.eyeTrackerStatus) {
+        this.deviceStatus = result.eyeTrackerStatus
       }
     })
   }
@@ -151,6 +168,12 @@ export class EyeTrackerManager {
           this.tracker.startTracking()
           this.deviceStatus = DeviceStatus.TRACKING
           this.isTracking = true
+          
+          // Update storage with tracking state
+          chrome.storage.local.set({
+            eyeTrackerTracking: true,
+            eyeTrackerStatus: DeviceStatus.TRACKING
+          })
         }
         
         this.broadcastStatus() // Update status with calibration info
@@ -283,7 +306,9 @@ export class EyeTrackerManager {
           chrome.tabs.sendMessage(tab.id, {
             type: 'EYE_TRACKER_STATUS',
             status: this.deviceStatus,
-            isConnected: this.isConnected
+            isConnected: this.isConnected,
+            isCalibrated: this.isCalibrated,
+            isTracking: this.isTracking
           }).catch(() => {
             // Ignore errors for tabs without content script
           })
