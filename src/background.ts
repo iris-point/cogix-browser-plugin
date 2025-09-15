@@ -383,106 +383,203 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       })();
       return true;
 
-    case 'DATA_IO_UPLOAD_SESSION':
-      // Upload complete eye tracking session from background script
-      const { uploadId, projectId: uploadProjectId, sessionId: uploadSessionId, videoBlob, gazeData, metadata, screenDimensions } = request;
-      debugLog('BACKGROUND', 'Uploading eye tracking session', { 
-        uploadId,
-        sessionId: uploadSessionId, 
-        projectId: uploadProjectId,
-        videoSize: videoBlob?.length || 0,
-        gazePoints: gazeData?.length || 0
+    case 'DATA_IO_UPLOAD_SESSION_INDEXED':
+      // Handle large video upload via IndexedDB reference
+      const { uploadId: indexedUploadId, projectId: indexedProjectId, sessionId: indexedSessionId, videoBlobId, videoBlobSize, gazeData: indexedGazeData, metadata: indexedMetadata, screenDimensions: indexedScreenDims } = request;
+      debugLog('BACKGROUND', 'Large video upload via IndexedDB', { 
+        uploadId: indexedUploadId,
+        videoBlobId,
+        videoBlobSize,
+        sessionId: indexedSessionId
       });
       
       (async () => {
         try {
-          // Send progress update to content script
-          const sendProgressUpdate = (percent: number, message: string) => {
-            chrome.tabs.query({}, (tabs) => {
-              tabs.forEach(tab => {
-                if (tab.id) {
-                  chrome.tabs.sendMessage(tab.id, {
-                    type: 'UPLOAD_PROGRESS',
-                    uploadId,
-                    percent,
-                    message
-                  }).catch(() => {
-                    // Ignore errors
-                  });
-                }
+          // Open IndexedDB and retrieve the video blob
+          debugLog('BACKGROUND', 'Opening IndexedDB to retrieve video blob', { videoBlobId });
+          const db = await new Promise<IDBDatabase>((resolve, reject) => {
+            const request = indexedDB.open('CogixVideoDB', 2); // Match version from content script
+            
+            request.onsuccess = () => {
+              debugLog('BACKGROUND', 'IndexedDB opened successfully');
+              resolve(request.result);
+            };
+            
+            request.onerror = () => {
+              debugLog('BACKGROUND', 'Failed to open IndexedDB', { error: request.error });
+              reject(request.error);
+            };
+            
+            // Handle upgrade if needed (shouldn't happen in background, but just in case)
+            request.onupgradeneeded = (event) => {
+              debugLog('BACKGROUND', 'IndexedDB upgrade needed');
+              const db = (event.target as IDBOpenDBRequest).result;
+              if (!db.objectStoreNames.contains('videos')) {
+                db.createObjectStore('videos', { keyPath: 'id' });
+                debugLog('BACKGROUND', 'Created videos object store');
+              }
+            };
+          });
+          
+          // Get video blob from IndexedDB
+          debugLog('BACKGROUND', 'Creating transaction to retrieve video');
+          const transaction = db.transaction(['videos'], 'readonly');
+          const store = transaction.objectStore('videos');
+          const getRequest = store.get(videoBlobId);
+          
+          const videoData = await new Promise<any>((resolve, reject) => {
+            getRequest.onsuccess = () => {
+              const result = getRequest.result;
+              debugLog('BACKGROUND', 'IndexedDB get request completed', { 
+                found: !!result,
+                hasBlob: !!(result && result.blob),
+                id: result?.id
               });
+              resolve(result);
+            };
+            getRequest.onerror = () => {
+              debugLog('BACKGROUND', 'IndexedDB get request failed', { error: getRequest.error });
+              reject(getRequest.error);
+            };
+          });
+          
+          if (!videoData || !videoData.blob) {
+            // List all keys in the store for debugging
+            const allKeys = await new Promise<any[]>((resolve, reject) => {
+              const keysRequest = store.getAllKeys();
+              keysRequest.onsuccess = () => resolve(keysRequest.result);
+              keysRequest.onerror = () => reject(keysRequest.error);
             });
-          };
+            debugLog('BACKGROUND', 'Available keys in IndexedDB', { keys: allKeys, requestedKey: videoBlobId });
+            throw new Error(`Video blob not found in IndexedDB. Requested ID: ${videoBlobId}, Available IDs: ${allKeys.join(', ')}`);
+          }
           
-          sendProgressUpdate(30, 'Preparing data for upload...');
+          debugLog('BACKGROUND', 'Retrieved video blob from IndexedDB', { 
+            size: videoData.blob.size 
+          });
           
-          // Convert serialized blob data back to File objects
-          const videoFile = videoBlob ? new File([new Uint8Array(videoBlob)], `recording-${uploadSessionId}.webm`, { 
+          // Create File from Blob
+          const videoFile = new File([videoData.blob], `recording-${indexedSessionId}.webm`, { 
             type: 'video/webm' 
-          }) : undefined;
+          });
           
-          const gazeFile = gazeData ? new File([JSON.stringify(gazeData)], `gaze-data-${uploadSessionId}.json`, { 
+          const gazeFile = indexedGazeData ? new File([JSON.stringify(indexedGazeData)], `gaze-data-${indexedSessionId}.json`, { 
             type: 'application/json' 
           }) : undefined;
-
-          console.log('📁 [BACKGROUND] Created files for upload:', {
-            video: videoFile ? `${videoFile.name} (${videoFile.size} bytes)` : 'None',
-            gaze: gazeFile ? `${gazeFile.name} (${gazeFile.size} bytes)` : 'None'
-          });
-
+          
+          // Upload using backgroundDataIOClient
           const result = await backgroundDataIOClient.submitEyeTrackingSession(
-            uploadProjectId,
-            uploadSessionId,
+            indexedProjectId,
+            indexedSessionId,
             {
               videoFile,
               gazeDataFile: gazeFile,
-              gazeData: gazeData,
+              gazeData: indexedGazeData,
               participantId: 'browser-extension',
               metadata: {
-                ...metadata,
-                // Use screen dimensions from content script if provided
-                screen_width: screenDimensions?.width || metadata?.screen_width || 1920,
-                screen_height: screenDimensions?.height || metadata?.screen_height || 1080
-              },
-              onProgress: (stage: string, progress: number, details?: any) => {
-                // Send progress updates back to content script
-                let message = 'Uploading...';
-                let percent = progress;
-                
-                if (stage === 'preparing') {
-                  message = 'Preparing upload...';
-                  percent = Math.min(30, progress * 0.3);
-                } else if (stage === 'uploading') {
-                  message = 'Uploading data to server...';
-                  percent = 30 + (progress * 0.6); // 30-90%
-                } else if (stage === 'processing') {
-                  message = 'Processing on server...';
-                  percent = 90 + (progress * 0.1); // 90-100%
-                }
-                
-                sendProgressUpdate(percent, message);
-                
-                // Also send detailed progress for debugging
-                if (sender.tab?.id) {
-                  chrome.tabs.sendMessage(sender.tab.id, {
-                    type: 'UPLOAD_PROGRESS_DETAIL',
-                    uploadId,
-                    sessionId: uploadSessionId,
-                    stage,
-                    progress,
-                    details
-                  }).catch(() => {
-                    // Ignore errors
-                  });
-                }
+                ...indexedMetadata,
+                screen_width: indexedScreenDims?.width || 1920,
+                screen_height: indexedScreenDims?.height || 1080
               }
             }
           );
           
-          debugLog('BACKGROUND', 'Session upload successful', { sessionId: uploadSessionId, result });
+          debugLog('BACKGROUND', 'IndexedDB video upload successful', { sessionId: indexedSessionId });
+          
+          // Clean up the video from IndexedDB after successful upload
+          try {
+            const db = await new Promise<IDBDatabase>((resolve, reject) => {
+              const request = indexedDB.open('CogixVideoDB', 2); // Match version
+              request.onsuccess = () => resolve(request.result);
+              request.onerror = () => reject(request.error);
+              request.onupgradeneeded = (event) => {
+                const db = (event.target as IDBOpenDBRequest).result;
+                if (!db.objectStoreNames.contains('videos')) {
+                  db.createObjectStore('videos', { keyPath: 'id' });
+                }
+              };
+            });
+            
+            const deleteTransaction = db.transaction(['videos'], 'readwrite');
+            const deleteStore = deleteTransaction.objectStore('videos');
+            deleteStore.delete(videoBlobId);
+            
+            await new Promise((resolve, reject) => {
+              deleteTransaction.oncomplete = () => {
+                debugLog('BACKGROUND', 'Cleaned up video from IndexedDB', { videoBlobId });
+                resolve(undefined);
+              };
+              deleteTransaction.onerror = () => reject(deleteTransaction.error);
+            });
+            
+            db.close();
+          } catch (cleanupError) {
+            debugLog('BACKGROUND', 'Failed to cleanup IndexedDB', { error: cleanupError.message });
+            // Non-critical error, don't fail the upload
+          }
+          
           sendResponse({ success: true, result });
+          
         } catch (error) {
-          debugLog('BACKGROUND', 'Session upload failed', { sessionId: uploadSessionId, error: error.message });
+          debugLog('BACKGROUND', 'IndexedDB video upload failed', { error: error.message });
+          sendResponse({ 
+            success: false, 
+            error: error instanceof Error ? error.message : String(error)
+          });
+        }
+      })();
+      return true;
+      
+    case 'DATA_IO_UPLOAD_SESSION_BLOB_URL':
+      // Handle upload using blob URL
+      const { uploadId: blobUploadId, projectId: blobProjectId, sessionId: blobSessionId, videoBlobUrl, videoBlobSize: blobVideoSize, gazeData: blobGazeData, metadata: blobMetadata, screenDimensions: blobScreenDims } = request;
+      debugLog('BACKGROUND', 'Upload via blob URL', { 
+        uploadId: blobUploadId,
+        blobUrl: videoBlobUrl,
+        size: blobVideoSize,
+        sessionId: blobSessionId
+      });
+      
+      (async () => {
+        try {
+          // Fetch the blob from the URL
+          debugLog('BACKGROUND', 'Fetching blob from URL');
+          const response = await fetch(videoBlobUrl);
+          const videoBlob = await response.blob();
+          
+          debugLog('BACKGROUND', 'Blob fetched successfully', { size: videoBlob.size });
+          
+          // Create File from Blob
+          const videoFile = new File([videoBlob], `recording-${blobSessionId}.webm`, { 
+            type: 'video/webm' 
+          });
+          
+          const gazeFile = blobGazeData ? new File([JSON.stringify(blobGazeData)], `gaze-data-${blobSessionId}.json`, { 
+            type: 'application/json' 
+          }) : undefined;
+          
+          // Upload using backgroundDataIOClient
+          const result = await backgroundDataIOClient.submitEyeTrackingSession(
+            blobProjectId,
+            blobSessionId,
+            {
+              videoFile,
+              gazeDataFile: gazeFile,
+              gazeData: blobGazeData,
+              participantId: 'browser-extension',
+              metadata: {
+                ...blobMetadata,
+                screen_width: blobScreenDims?.width || 1920,
+                screen_height: blobScreenDims?.height || 1080
+              }
+            }
+          );
+          
+          debugLog('BACKGROUND', 'Blob URL upload successful', { sessionId: blobSessionId });
+          sendResponse({ success: true, result });
+          
+        } catch (error) {
+          debugLog('BACKGROUND', 'Blob URL upload failed', { error: error.message });
           sendResponse({ 
             success: false, 
             error: error instanceof Error ? error.message : String(error)

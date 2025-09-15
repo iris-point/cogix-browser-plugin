@@ -71,6 +71,8 @@ function createOverlay() {
     backdrop-filter: blur(10px);
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
     min-width: 250px;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transform-origin: bottom right;
   `
 
   // Create status display
@@ -82,6 +84,7 @@ function createOverlay() {
     background: rgba(74, 144, 226, 0.2);
     border-radius: 6px;
     text-align: center;
+    transition: opacity 0.3s ease;
   `
   statusDisplay.innerHTML = `
     <div style="font-weight: 600; margin-bottom: 4px;">Eye Tracker Status</div>
@@ -91,10 +94,12 @@ function createOverlay() {
 
   // Create control buttons
   const controls = document.createElement('div')
+  controls.id = 'cogix-controls'
   controls.style.cssText = `
     display: flex;
     gap: 8px;
     margin-top: 10px;
+    transition: opacity 0.3s ease;
   `
 
   // Record button
@@ -168,6 +173,66 @@ function createOverlay() {
 
   document.body.appendChild(container)
 
+  // Create minimal recording indicator (hidden by default)
+  const minimalIndicator = document.createElement('div')
+  minimalIndicator.id = 'cogix-minimal-indicator'
+  minimalIndicator.style.cssText = `
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    width: 60px;
+    height: 60px;
+    background: rgba(231, 76, 60, 0.95);
+    border-radius: 50%;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(231, 76, 60, 0.4);
+    z-index: 2147483647;
+    animation: pulse 2s infinite;
+    transition: all 0.3s ease;
+    opacity: 0;
+    transform: scale(0.8);
+  `
+  minimalIndicator.innerHTML = `
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+    </svg>
+  `
+  minimalIndicator.title = 'Stop Recording'
+  minimalIndicator.onclick = () => stopRecording()
+  document.body.appendChild(minimalIndicator)
+
+  // Add pulse animation styles
+  const style = document.createElement('style')
+  style.textContent = `
+    @keyframes pulse {
+      0% {
+        box-shadow: 0 0 0 0 rgba(231, 76, 60, 0.7);
+      }
+      70% {
+        box-shadow: 0 0 0 20px rgba(231, 76, 60, 0);
+      }
+      100% {
+        box-shadow: 0 0 0 0 rgba(231, 76, 60, 0);
+      }
+    }
+    
+    /* Hide Chrome's screen sharing notification bar */
+    .goog-shadow-notification-bar {
+      display: none !important;
+    }
+    
+    /* Additional selectors for Chrome's sharing indicator */
+    [aria-label*="sharing your screen"],
+    [aria-label*="sharing this tab"],
+    [aria-label*="sharing a window"] {
+      display: none !important;
+    }
+  `
+  document.head.appendChild(style)
+
   // ============================================================================
   // Event Handlers
   // ============================================================================
@@ -237,6 +302,116 @@ function createOverlay() {
   // Update status periodically
   updateStatus()
   setInterval(updateStatus, 1000)
+}
+
+// ============================================================================
+// UI Transition Functions
+// ============================================================================
+
+function transitionToMinimalUI() {
+  const overlay = document.getElementById('cogix-overlay')
+  const container = document.getElementById('cogix-overlay-container')
+  const minimalIndicator = document.getElementById('cogix-minimal-indicator')
+  
+  if (overlay && container) {
+    // Fade out the main overlay
+    overlay.style.opacity = '0'
+    overlay.style.transform = 'scale(0.8)'
+    
+    setTimeout(() => {
+      container.style.display = 'none'
+      
+      // Show minimal indicator
+      if (minimalIndicator) {
+        minimalIndicator.style.display = 'flex'
+        requestAnimationFrame(() => {
+          minimalIndicator.style.opacity = '1'
+          minimalIndicator.style.transform = 'scale(1)'
+        })
+      }
+    }, 300)
+  }
+  
+  // Attempt to hide Chrome's screen sharing bar
+  hideChromeSharingBar()
+}
+
+function transitionToNormalUI() {
+  const overlay = document.getElementById('cogix-overlay')
+  const container = document.getElementById('cogix-overlay-container')
+  const minimalIndicator = document.getElementById('cogix-minimal-indicator')
+  
+  if (minimalIndicator) {
+    minimalIndicator.style.opacity = '0'
+    minimalIndicator.style.transform = 'scale(0.8)'
+    
+    setTimeout(() => {
+      minimalIndicator.style.display = 'none'
+      
+      // Show main overlay
+      if (container && overlay) {
+        container.style.display = 'flex'
+        requestAnimationFrame(() => {
+          overlay.style.opacity = '1'
+          overlay.style.transform = 'scale(1)'
+        })
+      }
+    }, 300)
+  }
+}
+
+function hideChromeSharingBar() {
+  // Try multiple methods to hide Chrome's sharing notification
+  
+  // Method 1: Find and hide by common class names
+  const selectors = [
+    '.goog-shadow-notification-bar',
+    '[role="alert"]',
+    '[aria-label*="sharing"]',
+    '[aria-label*="screen"]',
+    '[aria-label*="tab"]',
+    '[aria-label*="window"]'
+  ]
+  
+  selectors.forEach(selector => {
+    const elements = document.querySelectorAll(selector)
+    elements.forEach(el => {
+      if (el instanceof HTMLElement) {
+        const text = el.textContent?.toLowerCase() || ''
+        const ariaLabel = el.getAttribute('aria-label')?.toLowerCase() || ''
+        if (text.includes('sharing') || ariaLabel.includes('sharing')) {
+          el.style.display = 'none'
+          el.style.visibility = 'hidden'
+        }
+      }
+    })
+  })
+  
+  // Method 2: Monitor for new elements
+  const observer = new MutationObserver((mutations) => {
+    mutations.forEach((mutation) => {
+      mutation.addedNodes.forEach((node) => {
+        if (node instanceof HTMLElement) {
+          const text = node.textContent?.toLowerCase() || ''
+          const ariaLabel = node.getAttribute('aria-label')?.toLowerCase() || ''
+          if ((text.includes('sharing') && text.includes('screen')) ||
+              (ariaLabel.includes('sharing') && ariaLabel.includes('screen'))) {
+            node.style.display = 'none'
+            node.style.visibility = 'hidden'
+          }
+        }
+      })
+    })
+  })
+  
+  // Start observing
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true
+  })
+  
+  // Stop observing after 10 seconds
+  setTimeout(() => observer.disconnect(), 10000)
 }
 
 // ============================================================================
@@ -356,6 +531,11 @@ async function startRecording(projectId: string) {
     // Update state display
     updateRecordingState(true)
     
+    // Transition to minimal UI after a short delay
+    setTimeout(() => {
+      transitionToMinimalUI()
+    }, 1500) // Give user time to see the recording started
+    
     // Notify background script
     await chrome.runtime.sendMessage({
       type: 'RECORDING_STARTED',
@@ -395,15 +575,20 @@ async function stopRecording() {
   
   isRecording = false
   
-  // Update UI
-  const recordButton = document.getElementById('cogix-record-btn') as HTMLButtonElement
-  if (recordButton) {
-    recordButton.textContent = '🔴 Start Recording'
-    recordButton.style.background = '#e74c3c'
-  }
+  // Transition back to normal UI
+  transitionToNormalUI()
   
-  // Update state display
-  updateRecordingState(false)
+  // Update UI after transition
+  setTimeout(() => {
+    const recordButton = document.getElementById('cogix-record-btn') as HTMLButtonElement
+    if (recordButton) {
+      recordButton.textContent = '🔴 Start Recording'
+      recordButton.style.background = '#e74c3c'
+    }
+    
+    // Update state display
+    updateRecordingState(false)
+  }, 350)
   
   console.log('✅ Recording stopped')
 }
@@ -498,137 +683,54 @@ async function finalizeRecording(projectId: string) {
     // Show duration extraction progress
     updateUploadProgress(45, 'uploading', `Extracting video duration (${videoDuration.toFixed(1)}s)...`)
     
-    console.log('📡 Starting DIRECT upload to data-io...')
+    console.log('📡 Starting upload via background script (avoids CORS)...')
     
-    // Skip Chrome message passing - upload directly to avoid size limits!
     const videoSizeMB = (videoBlob.size / 1024 / 1024).toFixed(1)
-    console.log(`📤 Uploading ${videoSizeMB}MB video directly to server...`)
-    
-    // Get auth token from storage
-    const authResult = await chrome.storage.sync.get(['clerkToken'])
-    const authToken = authResult.clerkToken
-    
-    if (!authToken) {
-      throw new Error('Not authenticated - please sign in')
-    }
-    
-    // Create form data for multipart upload
-    const formData = new FormData()
-    
-    // Add video file
-    const videoFile = new File([videoBlob], `recording-${sessionId}.webm`, { 
-      type: 'video/webm' 
-    })
-    formData.append('file', videoFile)
-    
-    // Add metadata
-    formData.append('participant_id', 'browser-extension')
-    formData.append('session_type', 'eye_tracking')
-    formData.append('file_type', 'video')
-    
-    // Add all metadata fields
-    Object.entries(metadata).forEach(([key, value]) => {
-      if (value !== undefined && value !== null) {
-        formData.append(key, String(value))
-      }
-    })
-    
-    // Add screen dimensions
-    formData.append('screen_width', String(screen.width))
-    formData.append('screen_height', String(screen.height))
-    
-    // Direct upload to data-io worker
-    const DATA_IO_URL = 'https://data-io.cogix.app' // or 'https://cogix-data-io.workers.dev'
-    
-    updateUploadProgress(50, 'uploading', 'Uploading video to server...')
+    console.log(`📤 Video size: ${videoSizeMB}MB`)
     
     try {
-      // Upload video file
-      const videoResponse = await fetch(`${DATA_IO_URL}/upload/${projectId}/${sessionId}`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${authToken}`
-        },
-        body: formData
+      // For videos, we need to use a blob URL that the background script can fetch
+      // Create a blob URL that can be accessed by the background script
+      const blobUrl = URL.createObjectURL(videoBlob)
+      console.log('📎 Created blob URL for video:', blobUrl)
+      
+      // Send the blob URL to background script
+      console.log('📨 Sending upload request to background...')
+      const result = await chrome.runtime.sendMessage({
+        type: 'DATA_IO_UPLOAD_SESSION_BLOB_URL',
+        uploadId: currentUploadId,
+        projectId,
+        sessionId,
+        videoBlobUrl: blobUrl,
+        videoBlobSize: videoBlob.size,
+        gazeData: gazeDataBuffer,
+        metadata,
+        screenDimensions: {
+          width: screen.width,
+          height: screen.height
+        }
       })
       
-      if (!videoResponse.ok) {
-        const errorText = await videoResponse.text()
-        throw new Error(`Upload failed: ${videoResponse.status} - ${errorText}`)
+      // Clean up blob URL after upload
+      URL.revokeObjectURL(blobUrl)
+      
+      if (!result.success) {
+        throw new Error(result.error || 'Upload failed')
       }
       
-      const videoResult = await videoResponse.json()
-      console.log('✅ Video uploaded successfully:', videoResult)
+      console.log('✅ Upload successful!')
       
-      updateUploadProgress(70, 'uploading', 'Uploading gaze data...')
-      
-      // Upload gaze data if available
-      if (gazeDataBuffer && gazeDataBuffer.length > 0) {
-        const gazeFormData = new FormData()
-        const gazeFile = new File([JSON.stringify(gazeDataBuffer)], `gaze-data-${sessionId}.json`, { 
-          type: 'application/json' 
-        })
-        gazeFormData.append('file', gazeFile)
-        gazeFormData.append('participant_id', 'browser-extension')
-        gazeFormData.append('file_type', 'gaze_data')
-        
-        const gazeResponse = await fetch(`${DATA_IO_URL}/upload/${projectId}/${sessionId}`, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${authToken}`
-          },
-          body: gazeFormData
-        })
-        
-        if (!gazeResponse.ok) {
-          console.warn('Failed to upload gaze data:', await gazeResponse.text())
-        } else {
-          console.log('✅ Gaze data uploaded successfully')
-        }
-      }
-      
-      updateUploadProgress(85, 'uploading', 'Finalizing session...')
-      
-      // Submit session metadata
-      const sessionData = {
-        session_id: sessionId,
-        participant_id: 'browser-extension',
-        video_file_key: videoResult.key || `${projectId}/${sessionId}/recording-${sessionId}.webm`,
-        gaze_data_file_key: gazeDataBuffer?.length > 0 ? `${projectId}/${sessionId}/gaze-data-${sessionId}.json` : null,
-        metadata: {
-          ...metadata,
-          screen_width: screen.width,
-          screen_height: screen.height,
-          gaze_points_count: gazeDataBuffer?.length || 0,
-          has_video: true,
-          has_gaze_file: gazeDataBuffer?.length > 0
-        }
-      }
-      
-      const submitResponse = await fetch(`${DATA_IO_URL}/submit/${projectId}`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${authToken}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(sessionData)
-      })
-      
-      if (!submitResponse.ok) {
-        console.warn('Failed to submit session metadata:', await submitResponse.text())
-      }
-      
-      console.log('✅ Direct upload successful!')
-      updateUploadProgress(100, 'completed', 'Upload successful!')
-      
-      // Mark as uploaded
-      await markUploadAsCompleted(currentUploadId, sessionId)
-      await removeUploadFromStorage(currentUploadId)
-      
-    } catch (uploadError) {
-      console.error('❌ Direct upload failed:', uploadError)
-      throw uploadError
+    } catch (error) {
+      console.error('❌ Upload failed:', error)
+      throw error // Re-throw the original error
     }
+    
+    console.log('✅ Upload successful!')
+    updateUploadProgress(100, 'completed', 'Upload successful!')
+    
+    // Mark as uploaded
+    await markUploadAsCompleted(currentUploadId, sessionId)
+    await removeUploadFromStorage(currentUploadId)
     
     // Hide progress UI after 3 seconds
     setTimeout(() => {
@@ -651,6 +753,76 @@ async function finalizeRecording(projectId: string) {
   gazeDataBuffer = []
   recordingStartTime = null
   recordingSessionId = null
+}
+
+// ============================================================================
+// IndexedDB Helpers for Large Video Transfer
+// ============================================================================
+
+async function openIndexedDB(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    // Increment version to 2 to ensure upgrade happens
+    const request = indexedDB.open('CogixVideoDB', 2)
+    
+    request.onerror = () => reject(request.error)
+    request.onsuccess = () => resolve(request.result)
+    
+    request.onupgradeneeded = (event) => {
+      const db = (event.target as IDBOpenDBRequest).result
+      
+      // Delete old object stores if they exist (clean slate)
+      const storesToDelete = ['videos', 'uploads', 'recordings']
+      for (const storeName of storesToDelete) {
+        if (db.objectStoreNames.contains(storeName)) {
+          db.deleteObjectStore(storeName)
+        }
+      }
+      
+      // Create the videos object store
+      if (!db.objectStoreNames.contains('videos')) {
+        db.createObjectStore('videos', { keyPath: 'id' })
+        console.log('📦 Created videos object store in IndexedDB')
+      }
+    }
+  })
+}
+
+async function storeVideoInIndexedDB(db: IDBDatabase, id: string, blob: Blob): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(['videos'], 'readwrite')
+    const store = transaction.objectStore('videos')
+    const data = { id, blob, timestamp: Date.now() }
+    const request = store.put(data)
+    
+    request.onsuccess = () => {
+      console.log('✅ Video stored in IndexedDB object store with ID:', id)
+    }
+    request.onerror = () => {
+      console.error('❌ Failed to store video in IndexedDB:', request.error)
+      reject(request.error)
+    }
+    
+    // Wait for transaction to complete
+    transaction.oncomplete = () => {
+      console.log('✅ IndexedDB transaction completed successfully')
+      resolve()
+    }
+    transaction.onerror = () => {
+      console.error('❌ IndexedDB transaction failed:', transaction.error)
+      reject(transaction.error)
+    }
+  })
+}
+
+async function deleteVideoFromIndexedDB(db: IDBDatabase, id: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(['videos'], 'readwrite')
+    const store = transaction.objectStore('videos')
+    const request = store.delete(id)
+    
+    request.onsuccess = () => resolve()
+    request.onerror = () => reject(request.error)
+  })
 }
 
 // ============================================================================
@@ -752,7 +924,7 @@ function updateGazeVisualization(x: number, y: number) {
   if (x >= 0 && x <= 1 && y >= 0 && y <= 1) {
     screenX = x * window.innerWidth
     screenY = y * window.innerHeight
-    console.log(`📍 Gaze: normalized(${x.toFixed(3)}, ${y.toFixed(3)}) → screen(${Math.round(screenX)}, ${Math.round(screenY)})`)
+    // console.log(`📍 Gaze: normalized(${x.toFixed(3)}, ${y.toFixed(3)}) → screen(${Math.round(screenX)}, ${Math.round(screenY)})`)
   }
   
   gazeOverlayElement.style.left = `${screenX}px`
