@@ -415,6 +415,56 @@ function hideChromeSharingBar() {
 }
 
 // ============================================================================
+// Screen Resolution Helpers
+// ============================================================================
+
+/**
+ * Get the actual screen resolution, accounting for device pixel ratio
+ * and multi-monitor setups
+ */
+function getActualScreenResolution() {
+  // Get the base screen dimensions
+  const baseWidth = window.screen.width
+  const baseHeight = window.screen.height
+  
+  // Get available screen dimensions (excludes taskbar/dock)
+  const availWidth = window.screen.availWidth
+  const availHeight = window.screen.availHeight
+  
+  // Get device pixel ratio for high-DPI displays
+  const pixelRatio = window.devicePixelRatio || 1
+  
+  // For actual physical resolution, multiply by pixel ratio
+  // But for recording and gaze tracking, we typically want logical pixels
+  const logicalWidth = baseWidth
+  const logicalHeight = baseHeight
+  
+  // Get viewport dimensions for reference
+  const viewportWidth = window.innerWidth
+  const viewportHeight = window.innerHeight
+  
+  console.log('📐 Screen dimensions:', {
+    screen: { width: baseWidth, height: baseHeight },
+    available: { width: availWidth, height: availHeight },
+    viewport: { width: viewportWidth, height: viewportHeight },
+    pixelRatio,
+    physical: { width: baseWidth * pixelRatio, height: baseHeight * pixelRatio }
+  })
+  
+  return {
+    width: logicalWidth,
+    height: logicalHeight,
+    availWidth,
+    availHeight,
+    viewportWidth,
+    viewportHeight,
+    pixelRatio,
+    physicalWidth: logicalWidth * pixelRatio,
+    physicalHeight: logicalHeight * pixelRatio
+  }
+}
+
+// ============================================================================
 // Recording Functions
 // ============================================================================
 
@@ -625,7 +675,10 @@ async function finalizeRecording(projectId: string) {
       videoDuration = getFallbackDuration(recordingStartTime || Date.now() - duration, Date.now())
     }
 
-    // Prepare metadata with accurate video duration
+    // Get actual screen resolution
+    const screenInfo = getActualScreenResolution()
+    
+    // Prepare metadata with accurate video duration and screen info
     const metadata = {
       duration: videoDuration, // Use extracted duration instead of calculated
       calculatedDuration: duration / 1000, // Keep calculated for comparison
@@ -633,8 +686,15 @@ async function finalizeRecording(projectId: string) {
       url: window.location.href,
       title: document.title,
       userAgent: navigator.userAgent,
-      screen_width: screen.width,
-      screen_height: screen.height,
+      screen_width: screenInfo.width,  // Actual screen width
+      screen_height: screenInfo.height, // Actual screen height
+      available_width: screenInfo.availWidth,
+      available_height: screenInfo.availHeight,
+      viewport_width: screenInfo.viewportWidth,
+      viewport_height: screenInfo.viewportHeight,
+      pixel_ratio: screenInfo.pixelRatio,
+      physical_width: screenInfo.physicalWidth,
+      physical_height: screenInfo.physicalHeight,
       gazePointsCount: gazeDataBuffer.length,
       videoSize: videoBlob.size,
       codec: getSupportedMimeType(),
@@ -667,8 +727,8 @@ async function finalizeRecording(projectId: string) {
       gazeDataCount: gazeDataBuffer.length,
       metadata,
       screenDimensions: {
-        width: screen.width,
-        height: screen.height
+        width: screenInfo.width,
+        height: screenInfo.height
       },
       timestamp: Date.now(),
       status: 'pending'
@@ -916,19 +976,28 @@ function updateGazeVisualization(x: number, y: number) {
   }
   
   // Convert normalized coordinates (0-1) to screen pixels
-  // The eye tracker likely sends normalized coordinates
-  let screenX = x * window.innerWidth;
-  let screenY = y * window.innerHeight;
+  // The eye tracker sends normalized coordinates based on actual screen resolution
+  const screenWidth = window.screen.width
+  const screenHeight = window.screen.height
+  
+  // For storage, use actual screen coordinates
+  let screenX = x * screenWidth;
+  let screenY = y * screenHeight;
   
   // Check if coordinates are normalized (between 0 and 1)
   if (x >= 0 && x <= 1 && y >= 0 && y <= 1) {
-    screenX = x * window.innerWidth
-    screenY = y * window.innerHeight
-    // console.log(`📍 Gaze: normalized(${x.toFixed(3)}, ${y.toFixed(3)}) → screen(${Math.round(screenX)}, ${Math.round(screenY)})`)
+    screenX = x * screenWidth
+    screenY = y * screenHeight
   }
   
-  gazeOverlayElement.style.left = `${screenX}px`
-  gazeOverlayElement.style.top = `${screenY}px`
+  // For display in browser viewport, we need to adjust for viewport position
+  // The browser viewport might be offset from screen origin (0,0)
+  // and might be smaller than the full screen
+  const viewportX = (screenX / screenWidth) * window.innerWidth
+  const viewportY = (screenY / screenHeight) * window.innerHeight
+  
+  gazeOverlayElement.style.left = `${viewportX}px`
+  gazeOverlayElement.style.top = `${viewportY}px`
   gazeOverlayElement.style.display = showGazePoint ? 'block' : 'none'
 }
 
@@ -1099,10 +1168,11 @@ async function startCalibration() {
   `
   
   // Create canvas for calibration points
+  // Use full screen dimensions for calibration
   const canvas = document.createElement('canvas')
   canvas.id = 'cogix-calibration-canvas'
-  canvas.width = window.innerWidth
-  canvas.height = window.innerHeight
+  canvas.width = window.screen.width
+  canvas.height = window.screen.height
   canvas.style.cssText = `
     position: absolute;
     top: 0;
