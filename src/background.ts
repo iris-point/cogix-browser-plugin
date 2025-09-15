@@ -463,7 +463,22 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             type: 'video/webm' 
           });
           
-          const gazeFile = indexedGazeData ? new File([JSON.stringify(indexedGazeData)], `gaze-data-${indexedSessionId}.json`, { 
+          // Wrap gaze data with metadata for the JSON file
+          const gazeDataWithMetadata = indexedGazeData ? {
+            session_id: indexedSessionId,
+            project_id: indexedProjectId,
+            participant_id: 'browser-extension',
+            metadata: {
+              duration: indexedMetadata?.duration || indexedMetadata?.actualDuration,
+              screen_width: indexedScreenDims?.width || 1920,
+              screen_height: indexedScreenDims?.height || 1080,
+              gaze_points_count: indexedGazeData.length,
+              recorded_at: new Date().toISOString()
+            },
+            gaze_data: indexedGazeData
+          } : null;
+          
+          const gazeFile = gazeDataWithMetadata ? new File([JSON.stringify(gazeDataWithMetadata)], `gaze-data-${indexedSessionId}.json`, { 
             type: 'application/json' 
           }) : undefined;
           
@@ -554,7 +569,22 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             type: 'video/webm' 
           });
           
-          const gazeFile = blobGazeData ? new File([JSON.stringify(blobGazeData)], `gaze-data-${blobSessionId}.json`, { 
+          // Wrap gaze data with metadata for the JSON file
+          const gazeDataWithMetadata = blobGazeData ? {
+            session_id: blobSessionId,
+            project_id: blobProjectId,
+            participant_id: 'browser-extension',
+            metadata: {
+              duration: blobMetadata?.duration || blobMetadata?.actualDuration,
+              screen_width: blobScreenDims?.width || 1920,
+              screen_height: blobScreenDims?.height || 1080,
+              gaze_points_count: blobGazeData.length,
+              recorded_at: new Date().toISOString()
+            },
+            gaze_data: blobGazeData
+          } : null;
+          
+          const gazeFile = gazeDataWithMetadata ? new File([JSON.stringify(gazeDataWithMetadata)], `gaze-data-${blobSessionId}.json`, { 
             type: 'application/json' 
           }) : undefined;
           

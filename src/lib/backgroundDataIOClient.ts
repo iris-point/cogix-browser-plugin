@@ -131,9 +131,18 @@ export class BackgroundDataIOClient {
     }
     
     // Add video duration metadata if provided
-    if (metadata?.videoDuration && file.type.startsWith('video/')) {
-      formData.append('video_duration', metadata.videoDuration.toString());
-      console.log('📹 [BACKGROUND] Adding video duration to upload:', metadata.videoDuration, 'seconds');
+    if (file.type.startsWith('video/')) {
+      // Use 'duration' if provided, fallback to 'videoDuration'
+      const duration = metadata?.duration || metadata?.videoDuration;
+      if (duration) {
+        formData.append('video_duration', duration.toString());
+        console.log('📹 [BACKGROUND] Adding video duration to upload:', duration, 'seconds');
+      }
+    }
+    
+    // Add any other metadata fields that might be useful
+    if (metadata?.duration) {
+      formData.append('duration', metadata.duration.toString());
     }
     
     console.log('📁 [BACKGROUND] Uploading file to data-io:', {
@@ -234,13 +243,26 @@ export class BackgroundDataIOClient {
       if (options.onProgress) options.onProgress('Uploading video file...', 20);
       console.log('📹 [BACKGROUND] Uploading video file...');
       
+      // Extract video duration from metadata - try multiple fields for compatibility
+      const videoDuration = options.metadata?.duration || 
+                           options.metadata?.actualDuration || 
+                           options.metadata?.video_duration ||
+                           options.metadata?.calculatedDuration;
+      
+      if (videoDuration) {
+        console.log('📏 [BACKGROUND] Video duration to be stored in R2 metadata:', videoDuration, 'seconds');
+      } else {
+        console.warn('⚠️ [BACKGROUND] No video duration found in metadata');
+      }
+      
       const videoResult = await this.uploadFile(
         projectId, 
         sessionId, 
         options.videoFile,
         options.participantId,
         {
-          videoDuration: options.metadata?.duration || options.metadata?.actualDuration
+          videoDuration: videoDuration,  // This will be sent as 'video_duration' in form data
+          duration: videoDuration  // Also pass as 'duration' for consistency
         }
       );
       videoFileKey = videoResult.file_key;
