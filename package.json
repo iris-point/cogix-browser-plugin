@@ -1,7 +1,7 @@
 {
   "name": "cogix-browser-plugin",
   "displayName": "Cogix Eye Tracking",
-  "version": "1.0.14",
+  "version": "1.0.15",
   "description": "Eye tracking, screen recording, and event capture for research",
   "author": "Cogix",
   "scripts": {
@@ -19,7 +19,7 @@
   },
   "dependencies": {
     "@clerk/chrome-extension": "^2.5.31",
-    "@iris-point/eye-tracking-core": "^1.0.10",
+    "@iris-point/eye-tracking-core": "^1.0.11",
     "@plasmohq/storage": "^1.13.0",
     "react": "18.2.0",
     "react-dom": "18.2.0",
