@@ -1,7 +1,7 @@
 {
   "name": "cogix-browser-plugin",
   "displayName": "Cogix Eye Tracking",
-  "version": "1.0.15",
+  "version": "1.0.16",
   "description": "Eye tracking, screen recording, and event capture for research",
   "author": "Cogix",
   "scripts": {
