@@ -135,33 +135,41 @@ export class EyeTrackerManager {
       this.tracker.on('calibrationProgress', (progress: any) => {
         console.log('Calibration progress:', progress)
         // The HHProvider sends nFinishedNum in the progress data
-        // We need to extract and forward it properly
-        const currentPoint = progress.nFinishedNum || progress.current || progress.point
+        // nFinishedNum is 1-based: 1 means first point finished, show second point
+        const finishedNum = progress.nFinishedNum
         
         // Calibration points are predefined in the library
         const calibrationPoints = [
-          { x: 0.1, y: 0.1 },  // Top-left
-          { x: 0.9, y: 0.1 },  // Top-right
-          { x: 0.5, y: 0.5 },  // Center
-          { x: 0.1, y: 0.9 },  // Bottom-left
-          { x: 0.9, y: 0.9 }   // Bottom-right
+          { x: 0.1, y: 0.1 },  // Top-left (index 0)
+          { x: 0.9, y: 0.1 },  // Top-right (index 1)
+          { x: 0.5, y: 0.5 },  // Center (index 2)
+          { x: 0.1, y: 0.9 },  // Bottom-left (index 3)
+          { x: 0.9, y: 0.9 }   // Bottom-right (index 4)
         ]
         
         // Broadcast calibration progress
         this.broadcastCalibrationProgress({
-          current: currentPoint,
+          current: finishedNum,
           total: progress.total || 5,
-          nFinishedNum: progress.nFinishedNum
+          nFinishedNum: finishedNum
         })
         
-        // Broadcast the current calibration point to show
-        if (currentPoint >= 0 && currentPoint < calibrationPoints.length) {
+        // When nFinishedNum=1, first point is done, show second point (index 1)
+        // When nFinishedNum=2, second point is done, show third point (index 2)
+        // The next point index is the same as nFinishedNum (since it's 1-based)
+        const nextPointIndex = finishedNum
+        
+        // Broadcast the next calibration point to show
+        if (nextPointIndex >= 0 && nextPointIndex < calibrationPoints.length) {
+          console.log(`[EyeTrackerManager] Point ${finishedNum} finished, showing next point at index ${nextPointIndex}`)
           this.broadcastCalibrationPoint({
-            x: calibrationPoints[currentPoint].x,
-            y: calibrationPoints[currentPoint].y,
-            index: currentPoint,
+            x: calibrationPoints[nextPointIndex].x,
+            y: calibrationPoints[nextPointIndex].y,
+            index: nextPointIndex,
             total: calibrationPoints.length
           })
+        } else if (finishedNum === calibrationPoints.length) {
+          console.log(`[EyeTrackerManager] All ${finishedNum} points finished, calibration should complete`)
         }
       })
 
