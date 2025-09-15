@@ -45,17 +45,34 @@ export interface SessionUploadOptions {
   metadata?: Partial<RecordingMetadata>;
 }
 
+// Token cache to prevent rate limiting
+interface TokenCacheEntry {
+  token: any;
+  expiresAt: number;
+}
+
+const tokenCache = new Map<string, TokenCacheEntry>();
+
 /**
  * Background Script Data-IO Client
- * 
+ *
  * All methods run in the background script context, avoiding CORS issues
  */
 export class BackgroundDataIOClient {
   
   /**
-   * Get JWT token for data-io access
+   * Get JWT token for data-io access with caching
    */
   async _getToken(projectId: string, sessionId?: string): Promise<any> {
+    // Create cache key
+    const cacheKey = `${projectId}_${sessionId || 'default'}`;
+
+    // Check if we have a valid cached token
+    const cached = tokenCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      console.log('✅ [BACKGROUND] Using cached data-io token for project:', projectId);
+      return cached.token;
+    }
     const authData = await chrome.storage.sync.get(['clerkToken']);
     const token = authData.clerkToken;
     
@@ -65,6 +82,12 @@ export class BackgroundDataIOClient {
 
     const tokenUrl = `${API_BASE_URL}/api/v1/data-io/generate`;
     console.log('🔑 [BACKGROUND] Fetching JWT token from:', tokenUrl);
+    console.log('🔑 [BACKGROUND] Request params:', {
+      project_id: projectId,
+      session_id: sessionId,
+      expires_in_hours: 8,
+      permissions: ['read', 'write']
+    });
     console.log('🔑 [BACKGROUND] Extension origin:', `chrome-extension://${chrome.runtime.id}`);
 
     const response = await fetch(tokenUrl, {
@@ -107,6 +130,14 @@ export class BackgroundDataIOClient {
 
     const tokenData = await response.json();
     console.log('✅ [BACKGROUND] JWT token received successfully');
+
+    // Cache the token for 7.5 hours (slightly less than the 8 hour expiration)
+    tokenCache.set(cacheKey, {
+      token: tokenData,
+      expiresAt: Date.now() + 7.5 * 60 * 60 * 1000
+    });
+    console.log('💾 [BACKGROUND] Token cached for project:', projectId);
+
     return tokenData;
   }
 
@@ -870,4 +901,10 @@ export class BackgroundDataIOClient {
 
 // Export singleton instance
 export const backgroundDataIOClient = new BackgroundDataIOClient();
+
+// Export a method to clear the token cache if needed
+export function clearDataIOTokenCache() {
+  tokenCache.clear();
+  console.log('🧹 [BACKGROUND] Data-IO token cache cleared');
+}
 export default backgroundDataIOClient;

@@ -24,6 +24,7 @@ let recordedChunks: Blob[] = []
 let gazeDataBuffer: any[] = []
 let recordingStartTime: number | null = null
 let recordingSessionId: string | null = null
+let recordingProjectId: string | null = null // Store project ID globally
 let showGazePoint = true
 let gazeOverlayElement: HTMLElement | null = null
 let isCalibrating = false
@@ -31,6 +32,135 @@ let calibrationUI: HTMLElement | null = null
 let uploadProgressUI: HTMLElement | null = null
 let currentUploadId: string | null = null
 let isUploading = false
+
+// Global recording state synced with background
+let globalRecordingState: any = null
+
+// Initialize by getting recording state from background
+chrome.runtime.sendMessage({ type: 'GET_RECORDING_STATE' }, (response) => {
+  if (response?.success && response.state) {
+    globalRecordingState = response.state
+    if (globalRecordingState.isRecording) {
+      // Restore recording UI if a recording is active
+      console.log('🎬 Restoring active recording session:', globalRecordingState)
+      restoreRecordingSession(globalRecordingState)
+    }
+  }
+})
+
+// ============================================================================
+// Recording Session Restoration (for tab switching)
+// ============================================================================
+
+function restoreRecordingSession(state: any) {
+  if (!state.isRecording) return
+
+  console.log('🔄 Restoring recording session from global state:', state)
+
+  // Restore recording state
+  isRecording = true
+  recordingStartTime = state.recordingStartTime
+  recordingSessionId = state.sessionId
+  recordingProjectId = state.projectId // Store project ID globally
+
+  // Restore gaze data buffer from global state
+  gazeDataBuffer = [...(state.gazeDataBuffer || [])]
+
+  // Note: We don't restart MediaRecorder here since each tab records its own content
+  // This is intentional - like Loom, we maintain recording state but each tab records separately
+
+  // Update UI to show recording indicator
+  const overlay = document.getElementById('cogix-overlay-container')
+  if (overlay) {
+    // Update recording button
+    const recordBtn = overlay.querySelector('#cogix-record-btn') as HTMLButtonElement
+    if (recordBtn) {
+      recordBtn.textContent = '⏹️'
+      recordBtn.title = 'Stop Recording'
+      recordBtn.style.background = 'linear-gradient(135deg, #FF6B35 0%, #FF8A65 100%)'
+    }
+
+    // Show recording indicator - Orange theme
+    let recordingIndicator = overlay.querySelector('#cogix-recording-indicator') as HTMLElement
+    if (!recordingIndicator) {
+      recordingIndicator = document.createElement('div')
+      recordingIndicator.id = 'cogix-recording-indicator'
+      recordingIndicator.style.cssText = `
+        position: fixed;
+        top: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: linear-gradient(135deg, #FF6B35 0%, #FF8A65 100%);
+        color: white;
+        padding: 10px 20px;
+        border-radius: 24px;
+        font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+        font-size: 14px;
+        font-weight: 500;
+        z-index: 2147483647;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        box-shadow: 0 4px 16px rgba(255, 107, 53, 0.3), 0 2px 8px rgba(0,0,0,0.1);
+      `
+      document.body.appendChild(recordingIndicator)
+    }
+
+    // Update recording time
+    const elapsed = Date.now() - recordingStartTime
+    const minutes = Math.floor(elapsed / 60000)
+    const seconds = Math.floor((elapsed % 60000) / 1000)
+    recordingIndicator.innerHTML = `
+      <span style="display: inline-block; width: 10px; height: 10px; background: white; border-radius: 50%; animation: pulse 1.5s infinite;"></span>
+      <span>Recording: ${state.projectId || 'Session'}</span>
+      <span style="font-weight: 700;">${minutes}:${seconds.toString().padStart(2, '0')}</span>
+      <style>
+        @keyframes pulse {
+          0%, 100% { opacity: 1; transform: scale(1); }
+          50% { opacity: 0.6; transform: scale(0.9); }
+        }
+      </style>
+    `
+  }
+
+  console.log('✅ Recording session restored:', {
+    sessionId: recordingSessionId,
+    elapsed: Date.now() - recordingStartTime,
+    gazePoints: gazeDataBuffer.length
+  })
+}
+
+function handleRecordingStop() {
+  console.log('🛑 Handling recording stop, mediaRecorder state:', mediaRecorder?.state)
+
+  isRecording = false
+
+  // Clean up UI
+  const recordingIndicator = document.getElementById('cogix-recording-indicator')
+  if (recordingIndicator) {
+    recordingIndicator.remove()
+  }
+
+  // Update button
+  const overlay = document.getElementById('cogix-overlay-container')
+  if (overlay) {
+    const recordBtn = overlay.querySelector('#cogix-record-btn') as HTMLButtonElement
+    if (recordBtn) {
+      recordBtn.textContent = '⏺️'
+      recordBtn.title = 'Start Recording'
+      recordBtn.style.background = 'linear-gradient(135deg, #FF6B35 0%, #FF8A65 100%)'
+    }
+  }
+
+  // Stop media recorder if active
+  // This will trigger the onstop handler which calls finalizeRecording
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+    console.log('⏹️ Stopping MediaRecorder, will trigger finalization')
+    mediaRecorder.stop()
+  } else {
+    console.log('ℹ️ MediaRecorder not active or not present on this tab')
+  }
+}
 
 // ============================================================================
 // Main Overlay Creation
@@ -57,39 +187,40 @@ function createOverlay() {
     align-items: flex-end;
   `
 
-  // Create main overlay panel
+  // Create main overlay panel - White and Orange theme
   const overlay = document.createElement('div')
   overlay.id = 'cogix-overlay'
   overlay.style.cssText = `
-    background: rgba(0, 0, 0, 0.9);
-    border: 2px solid #4A90E2;
-    border-radius: 12px;
-    padding: 15px;
-    color: white;
+    background: rgba(255, 255, 255, 0.98);
+    border: 2px solid #FF6B35;
+    border-radius: 16px;
+    padding: 18px;
+    color: #333333;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     font-size: 14px;
-    backdrop-filter: blur(10px);
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
-    min-width: 250px;
+    backdrop-filter: blur(12px);
+    box-shadow: 0 8px 32px rgba(255, 107, 53, 0.15), 0 2px 8px rgba(0, 0, 0, 0.1);
+    min-width: 260px;
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     transform-origin: bottom right;
   `
 
-  // Create status display
+  // Create status display - Orange accent
   const statusDisplay = document.createElement('div')
   statusDisplay.id = 'cogix-status'
   statusDisplay.style.cssText = `
-    margin-bottom: 10px;
-    padding: 8px;
-    background: rgba(74, 144, 226, 0.2);
-    border-radius: 6px;
+    margin-bottom: 12px;
+    padding: 10px;
+    background: linear-gradient(135deg, rgba(255, 107, 53, 0.08) 0%, rgba(255, 138, 101, 0.05) 100%);
+    border: 1px solid rgba(255, 107, 53, 0.2);
+    border-radius: 10px;
     text-align: center;
     transition: opacity 0.3s ease;
   `
   statusDisplay.innerHTML = `
-    <div style="font-weight: 600; margin-bottom: 4px;">Eye Tracker Status</div>
-    <div id="cogix-connection-status" style="font-size: 12px;">Checking...</div>
-    <div id="cogix-calibration-status" style="font-size: 12px; margin-top: 4px;"></div>
+    <div style="font-weight: 600; margin-bottom: 6px; color: #FF6B35;">Eye Tracker Status</div>
+    <div id="cogix-connection-status" style="font-size: 12px; color: #666;">Checking...</div>
+    <div id="cogix-calibration-status" style="font-size: 12px; margin-top: 4px; color: #666;"></div>
   `
 
   // Create control buttons
@@ -102,41 +233,58 @@ function createOverlay() {
     transition: opacity 0.3s ease;
   `
 
-  // Record button
+  // Record button - Orange primary
   const recordButton = document.createElement('button')
   recordButton.id = 'cogix-record-btn'
   recordButton.style.cssText = `
     flex: 1;
-    padding: 8px 12px;
-    background: #e74c3c;
+    padding: 10px 14px;
+    background: linear-gradient(135deg, #FF6B35 0%, #FF8A65 100%);
     color: white;
     border: none;
-    border-radius: 6px;
+    border-radius: 8px;
     font-size: 13px;
     font-weight: 600;
     cursor: pointer;
     transition: all 0.3s ease;
+    box-shadow: 0 2px 8px rgba(255, 107, 53, 0.3);
   `
-  recordButton.textContent = '🔴 Start Recording'
-  
-  // Gaze toggle button
+  recordButton.textContent = '⏺ Start Recording'
+  recordButton.onmouseover = () => {
+    recordButton.style.transform = 'translateY(-1px)'
+    recordButton.style.boxShadow = '0 4px 12px rgba(255, 107, 53, 0.4)'
+  }
+  recordButton.onmouseout = () => {
+    recordButton.style.transform = 'translateY(0)'
+    recordButton.style.boxShadow = '0 2px 8px rgba(255, 107, 53, 0.3)'
+  }
+
+  // Gaze toggle button - White with orange border
   const gazeToggleButton = document.createElement('button')
   gazeToggleButton.id = 'cogix-gaze-toggle'
   gazeToggleButton.style.cssText = `
-    padding: 8px 12px;
-    background: #2ecc71;
-    color: white;
-    border: none;
-    border-radius: 6px;
+    padding: 10px 14px;
+    background: white;
+    color: #FF6B35;
+    border: 2px solid #FF6B35;
+    border-radius: 8px;
     font-size: 13px;
     font-weight: 600;
     cursor: pointer;
     transition: all 0.3s ease;
   `
-  
+
   const updateGazeToggleButton = () => {
     gazeToggleButton.textContent = showGazePoint ? '👁️' : '👁️‍🗨️'
-    gazeToggleButton.style.background = showGazePoint ? '#2ecc71' : '#95a5a6'
+    if (showGazePoint) {
+      gazeToggleButton.style.background = 'linear-gradient(135deg, #FF6B35 0%, #FF8A65 100%)'
+      gazeToggleButton.style.color = 'white'
+      gazeToggleButton.style.border = '2px solid transparent'
+    } else {
+      gazeToggleButton.style.background = 'white'
+      gazeToggleButton.style.color = '#FF6B35'
+      gazeToggleButton.style.border = '2px solid #FF6B35'
+    }
     gazeToggleButton.title = showGazePoint ? 'Hide gaze point' : 'Show gaze point'
   }
 
@@ -147,29 +295,38 @@ function createOverlay() {
   overlay.appendChild(controls)
   container.appendChild(overlay)
 
-  // Create state display (for debugging)
+  // Create state display (for debugging) - HIDDEN BY DEFAULT - Orange theme
   const stateDisplay = document.createElement('div')
   stateDisplay.id = 'cogix-state-display'
   stateDisplay.style.cssText = `
-    background: rgba(0, 0, 0, 0.8);
-    border: 1px solid #666;
-    border-radius: 8px;
-    padding: 10px;
-    color: #0f0;
-    font-family: 'Courier New', monospace;
+    background: rgba(255, 255, 255, 0.95);
+    border: 2px solid #FF6B35;
+    border-radius: 10px;
+    padding: 12px;
+    color: #333;
+    font-family: 'SF Mono', 'Monaco', 'Courier New', monospace;
     font-size: 11px;
     max-width: 250px;
+    display: none; /* Hidden by default - can be toggled with keyboard shortcut */
+    box-shadow: 0 4px 12px rgba(255, 107, 53, 0.2);
   `
   stateDisplay.innerHTML = `
-    <div style="margin-bottom: 5px; color: #fff; font-weight: bold;">State Monitor</div>
-    <div>Status: <span id="cogix-status-text">Loading...</span></div>
-    <div>Connected: <span id="cogix-connected-text">false</span></div>
-    <div>Calibrated: <span id="cogix-calibrated-text">false</span></div>
-    <div>Tracking: <span id="cogix-tracking-text">false</span></div>
-    <div>Recording: <span id="cogix-recording-text">false</span></div>
-    <div>Gaze Points: <span id="cogix-gaze-count">0</span></div>
+    <div style="margin-bottom: 8px; color: #FF6B35; font-weight: bold; font-size: 12px;">🔧 State Monitor</div>
+    <div style="margin: 4px 0;">Status: <span id="cogix-status-text" style="color: #FF6B35; font-weight: 600;">Loading...</span></div>
+    <div style="margin: 4px 0;">Connected: <span id="cogix-connected-text" style="color: #666;">false</span></div>
+    <div style="margin: 4px 0;">Calibrated: <span id="cogix-calibrated-text" style="color: #666;">false</span></div>
+    <div style="margin: 4px 0;">Tracking: <span id="cogix-tracking-text" style="color: #666;">false</span></div>
+    <div style="margin: 4px 0;">Recording: <span id="cogix-recording-text" style="color: #666;">false</span></div>
+    <div style="margin: 4px 0;">Gaze Points: <span id="cogix-gaze-count" style="color: #FF6B35; font-weight: 600;">0</span></div>
   `
   container.appendChild(stateDisplay)
+
+  // Add keyboard shortcut to toggle state monitor (Ctrl+Shift+D for Debug)
+  document.addEventListener('keydown', (e) => {
+    if (e.ctrlKey && e.shiftKey && e.key === 'D') {
+      stateDisplay.style.display = stateDisplay.style.display === 'none' ? 'block' : 'none'
+    }
+  })
 
   document.body.appendChild(container)
 
@@ -182,13 +339,13 @@ function createOverlay() {
     right: 20px;
     width: 60px;
     height: 60px;
-    background: rgba(231, 76, 60, 0.95);
+    background: linear-gradient(135deg, #FF6B35 0%, #FF8A65 100%);
     border-radius: 50%;
     display: none;
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    box-shadow: 0 4px 12px rgba(231, 76, 60, 0.4);
+    box-shadow: 0 4px 12px rgba(255, 107, 53, 0.4);
     z-index: 2147483647;
     animation: pulse 2s infinite;
     transition: all 0.3s ease;
@@ -209,13 +366,13 @@ function createOverlay() {
   style.textContent = `
     @keyframes pulse {
       0% {
-        box-shadow: 0 0 0 0 rgba(231, 76, 60, 0.7);
+        box-shadow: 0 0 0 0 rgba(255, 107, 53, 0.7);
       }
       70% {
-        box-shadow: 0 0 0 20px rgba(231, 76, 60, 0);
+        box-shadow: 0 0 0 20px rgba(255, 107, 53, 0);
       }
       100% {
-        box-shadow: 0 0 0 0 rgba(231, 76, 60, 0);
+        box-shadow: 0 0 0 0 rgba(255, 107, 53, 0);
       }
     }
     
@@ -285,11 +442,16 @@ function createOverlay() {
       // Get project info
       const projectData = await chrome.storage.sync.get(['selectedProject'])
       const projectId = projectData.selectedProject?.id
-      
+
+      console.log('📌 Selected project data:', projectData.selectedProject)
+
       if (!projectId) {
-        alert('Please select a project first')
+        console.error('❌ No project selected:', projectData)
+        alert('Please select a project first. Go to the extension popup to select a project.')
         return
       }
+
+      console.log('✅ Starting recording with project ID:', projectId)
       
       // Start recording
       await startRecording(projectId)
@@ -469,6 +631,9 @@ function getActualScreenResolution() {
 // ============================================================================
 
 async function startRecording(projectId: string) {
+  // Store project ID globally for use in finalization
+  recordingProjectId = projectId
+
   if (isRecording) {
     console.log('Already recording')
     return
@@ -562,7 +727,8 @@ async function startRecording(projectId: string) {
 
     mediaRecorder.onstop = async () => {
       console.log('🛑 MediaRecorder stopped, finalizing...')
-      await finalizeRecording(projectId)
+      // Use stored project ID which persists across tab switches
+      await finalizeRecording(recordingProjectId || projectId)
     }
 
     // Start recording - synchronized with eye tracking
@@ -644,7 +810,16 @@ async function stopRecording() {
   console.log('✅ Recording stopped')
 }
 
-async function finalizeRecording(projectId: string) {
+async function finalizeRecording(projectId?: string) {
+  // Use stored project ID if not provided
+  const effectiveProjectId = projectId || recordingProjectId
+
+  if (!effectiveProjectId) {
+    console.error('❌ No project ID available for upload')
+    showNotification('Failed to upload: No project selected', 'error')
+    return
+  }
+
   if (!recordingSessionId || recordedChunks.length === 0) {
     console.error('No recording data to finalize')
     return
@@ -655,7 +830,7 @@ async function finalizeRecording(projectId: string) {
   
   console.log('📤 Finalizing recording:', {
     sessionId,
-    projectId,
+    projectId: effectiveProjectId,
     duration: duration / 1000 + 's',
     chunks: recordedChunks.length,
     gazePoints: gazeDataBuffer.length
@@ -719,11 +894,11 @@ async function finalizeRecording(projectId: string) {
     
     // Generate upload ID
     currentUploadId = `upload_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-    
+
     // Save only metadata to local storage (not the video to avoid quota issues)
     const uploadMetadata = {
       uploadId: currentUploadId,
-      projectId,
+      projectId: effectiveProjectId,
       sessionId,
       videoBlobSize: videoBlob.size,
       gazeDataCount: gazeDataBuffer.length,
@@ -757,11 +932,11 @@ async function finalizeRecording(projectId: string) {
       console.log('📎 Created blob URL for video:', blobUrl)
       
       // Send the blob URL to background script
-      console.log('📨 Sending upload request to background...')
+      console.log('📨 Sending upload request to background with project ID:', effectiveProjectId)
       const result = await chrome.runtime.sendMessage({
         type: 'DATA_IO_UPLOAD_SESSION_BLOB_URL',
         uploadId: currentUploadId,
-        projectId,
+        projectId: effectiveProjectId,
         sessionId,
         videoBlobUrl: blobUrl,
         videoBlobSize: videoBlob.size,
@@ -891,13 +1066,37 @@ async function deleteVideoFromIndexedDB(db: IDBDatabase, id: string): Promise<vo
 // Eye Tracking Integration
 // ============================================================================
 
-// Listen for gaze data
+// Listen for messages from background and other sources
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   switch (message.type) {
+    case 'RECORDING_STATE_UPDATE':
+      // Update from background about global recording state
+      globalRecordingState = message.state
+      if (globalRecordingState.isRecording && !isRecording) {
+        // Another tab started recording or we're restoring state
+        console.log('📺 Recording state update - restoring UI')
+        restoreRecordingSession(globalRecordingState)
+      } else if (!globalRecordingState.isRecording && isRecording) {
+        // Recording was stopped globally
+        console.log('🛑 Recording stopped globally')
+        handleRecordingStop()
+
+        // Clear stored project ID
+        recordingProjectId = null
+      }
+      break
+
     case 'GAZE_DATA':
       handleGazeData(message.data)
+      // Also send to background for global buffer
+      if (isRecording && globalRecordingState?.isRecording) {
+        chrome.runtime.sendMessage({
+          type: 'ADD_GAZE_DATA',
+          gazeData: message.data
+        })
+      }
       break
-      
+
     case 'EYE_TRACKER_STATUS':
       updateEyeTrackerStatus(message)
       break
@@ -1083,8 +1282,8 @@ function updateGazeVisualization(x: number, y: number, rawX?: number, rawY?: num
       width: 20px;
       height: 20px;
       border-radius: 50%;
-      background: radial-gradient(circle, rgba(255,0,0,0.8) 0%, rgba(255,0,0,0.4) 50%, transparent 70%);
-      border: 2px solid rgba(255,0,0,0.6);
+      background: radial-gradient(circle, rgba(255,107,53,0.8) 0%, rgba(255,138,101,0.4) 50%, transparent 70%);
+      border: 2px solid rgba(255,107,53,0.6);
       pointer-events: none;
       z-index: 2147483646;
       transform: translate(-50%, -50%);
@@ -1101,8 +1300,8 @@ function updateGazeVisualization(x: number, y: number, rawX?: number, rawY?: num
       width: 10px;
       height: 10px;
       border-radius: 50%;
-      background: rgba(0, 100, 255, 0.3);
-      border: 1px solid rgba(0, 100, 255, 0.5);
+      background: rgba(255, 184, 151, 0.3);
+      border: 1px solid rgba(255, 184, 151, 0.5);
       pointer-events: none;
       z-index: 2147483645;
       transform: translate(-50%, -50%);
@@ -1118,8 +1317,9 @@ function updateGazeVisualization(x: number, y: number, rawX?: number, rawY?: num
       position: fixed;
       bottom: 20px;
       right: 20px;
-      background: rgba(0, 0, 0, 0.7);
-      color: white;
+      background: rgba(255, 255, 255, 0.95);
+      color: #333;
+      border: 1px solid #FF6B35;
       padding: 10px;
       border-radius: 5px;
       font-family: monospace;
@@ -1129,8 +1329,8 @@ function updateGazeVisualization(x: number, y: number, rawX?: number, rawY?: num
       line-height: 1.4;
     `
     gazeLegendElement.innerHTML = `
-      <div style="margin-bottom: 5px;"><span style="display:inline-block;width:10px;height:10px;background:rgba(255,0,0,0.8);border-radius:50%;margin-right:5px;"></span>Smoothed (Grid: ${gazeSmoothing.gridDivisions}x${gazeSmoothing.gridDivisions})</div>
-      <div><span style="display:inline-block;width:10px;height:10px;background:rgba(0,100,255,0.3);border-radius:50%;margin-right:5px;"></span>Raw Average (L+R Eyes)</div>
+      <div style="margin-bottom: 5px;"><span style="display:inline-block;width:10px;height:10px;background:rgba(255,107,53,0.8);border-radius:50%;margin-right:5px;"></span>Smoothed (Grid: ${gazeSmoothing.gridDivisions}x${gazeSmoothing.gridDivisions})</div>
+      <div><span style="display:inline-block;width:10px;height:10px;background:rgba(255,184,151,0.3);border-radius:50%;margin-right:5px;"></span>Raw Average (L+R Eyes)</div>
     `
     document.body.appendChild(gazeLegendElement)
   }
@@ -1214,8 +1414,8 @@ function handleCalibrationComplete(result: any) {
       width: 20px;
       height: 20px;
       border-radius: 50%;
-      background: radial-gradient(circle, rgba(255,0,0,0.8) 0%, rgba(255,0,0,0.4) 50%, transparent 70%);
-      border: 2px solid rgba(255,0,0,0.6);
+      background: radial-gradient(circle, rgba(255,107,53,0.8) 0%, rgba(255,138,101,0.4) 50%, transparent 70%);
+      border: 2px solid rgba(255,107,53,0.6);
       pointer-events: none;
       z-index: 2147483646;
       transform: translate(-50%, -50%);
@@ -1538,7 +1738,7 @@ function showUploadProgress(uploadData: any) {
       <div style="margin-bottom: 16px;">
         <div style="background: rgba(255, 255, 255, 0.1); border-radius: 8px; overflow: hidden; height: 8px;">
           <div id="cogix-upload-progress-bar" style="
-            background: linear-gradient(90deg, #176feb 0%, #44c1f7 100%);
+            background: linear-gradient(90deg, #FF6B35 0%, #FF8A65 100%);
             height: 100%;
             width: 0%;
             transition: width 0.3s ease;

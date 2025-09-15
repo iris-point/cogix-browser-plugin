@@ -9,6 +9,76 @@ debugLog('BACKGROUND', 'Background script initialized');
 // Initialize persistent eye tracker
 const eyeTrackerManager = EyeTrackerManager.getInstance()
 
+// Global Recording State Manager (persists across tabs like Loom)
+interface GlobalRecordingState {
+  isRecording: boolean
+  recordingStartTime: number | null
+  projectId: string | null
+  sessionId: string | null
+  streamId: string | null
+  activeTabId: number | null
+  gazeDataBuffer: any[]
+  recordingMetadata: any
+}
+
+const globalRecordingState: GlobalRecordingState = {
+  isRecording: false,
+  recordingStartTime: null,
+  projectId: null,
+  sessionId: null,
+  streamId: null,
+  activeTabId: null,
+  gazeDataBuffer: [],
+  recordingMetadata: {}
+}
+
+// Restore recording state from storage on startup
+chrome.storage.local.get(['globalRecordingState'], (result) => {
+  if (result.globalRecordingState) {
+    Object.assign(globalRecordingState, result.globalRecordingState)
+    debugLog('BACKGROUND', 'Restored recording state', globalRecordingState)
+
+    // Notify all tabs about the current recording state
+    if (globalRecordingState.isRecording) {
+      chrome.tabs.query({}, (tabs) => {
+        tabs.forEach(tab => {
+          if (tab.id) {
+            chrome.tabs.sendMessage(tab.id, {
+              type: 'RECORDING_STATE_UPDATE',
+              state: globalRecordingState
+            }).catch(() => {
+              // Tab might not have content script loaded
+            })
+          }
+        })
+      })
+    }
+  }
+})
+
+// Save recording state to storage whenever it changes
+function saveRecordingState() {
+  chrome.storage.local.set({ globalRecordingState }, () => {
+    debugLog('BACKGROUND', 'Recording state saved', globalRecordingState)
+  })
+}
+
+// Broadcast recording state to all tabs
+function broadcastRecordingState() {
+  chrome.tabs.query({}, (tabs) => {
+    tabs.forEach(tab => {
+      if (tab.id) {
+        chrome.tabs.sendMessage(tab.id, {
+          type: 'RECORDING_STATE_UPDATE',
+          state: globalRecordingState
+        }).catch(() => {
+          // Tab might not have content script loaded
+        })
+      }
+    })
+  })
+}
+
 // Listen for extension installation
 chrome.runtime.onInstalled.addListener((details) => {
   debugLog('BACKGROUND', 'Extension installed/updated', { reason: details.reason });
@@ -182,38 +252,67 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return true;
       
     case 'TOGGLE_RECORDING':
-      // Handle recording toggle from content script
+      // Handle recording toggle - now uses global state
       const { isRecording, projectId } = request;
       debugLog('BACKGROUND', 'Toggle recording', { isRecording, projectId });
-      
+
       if (isRecording) {
-        // Start recording - forward to active tab
-        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-          if (tabs[0]?.id) {
-            chrome.tabs.sendMessage(tabs[0].id, {
-              type: 'START_RECORDING',
-              projectId: projectId
-            }).catch((error) => {
-              debugLog('BACKGROUND', 'Failed to start recording', { error: error.message });
-            });
-          }
-        });
+        // Start recording globally
+        globalRecordingState.isRecording = true
+        globalRecordingState.recordingStartTime = Date.now()
+        globalRecordingState.projectId = projectId
+        globalRecordingState.sessionId = `session-${Date.now()}`
+        globalRecordingState.activeTabId = sender.tab?.id || null
+        globalRecordingState.gazeDataBuffer = []
+        globalRecordingState.recordingMetadata = {}
+
+        // Save and broadcast state to all tabs
+        saveRecordingState()
+        broadcastRecordingState()
+
+        debugLog('BACKGROUND', 'Started global recording', globalRecordingState)
       } else {
-        // Stop recording - forward to active tab
-        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-          if (tabs[0]?.id) {
-            chrome.tabs.sendMessage(tabs[0].id, {
-              type: 'STOP_RECORDING'
-            }).catch((error) => {
-              debugLog('BACKGROUND', 'Failed to stop recording', { error: error.message });
-            });
-          }
-        });
+        // Stop recording globally
+        globalRecordingState.isRecording = false
+
+        // Save and broadcast state to all tabs
+        saveRecordingState()
+        broadcastRecordingState()
+
+        debugLog('BACKGROUND', 'Stopped global recording')
       }
-      
-      sendResponse({ success: true });
+
+      sendResponse({ success: true, state: globalRecordingState });
       return true;
       
+    case 'GET_RECORDING_STATE':
+      // Return current global recording state
+      sendResponse({ success: true, state: globalRecordingState });
+      return true;
+
+    case 'UPDATE_RECORDING_METADATA':
+      // Update recording metadata (e.g., when switching tabs)
+      if (globalRecordingState.isRecording) {
+        Object.assign(globalRecordingState.recordingMetadata, request.metadata || {})
+        globalRecordingState.activeTabId = sender.tab?.id || globalRecordingState.activeTabId
+        saveRecordingState()
+        debugLog('BACKGROUND', 'Updated recording metadata', globalRecordingState.recordingMetadata)
+      }
+      sendResponse({ success: true });
+      return true;
+
+    case 'ADD_GAZE_DATA':
+      // Add gaze data to global buffer
+      if (globalRecordingState.isRecording && request.gazeData) {
+        globalRecordingState.gazeDataBuffer.push(request.gazeData)
+        // Keep buffer size reasonable (last 1000 points)
+        if (globalRecordingState.gazeDataBuffer.length > 1000) {
+          globalRecordingState.gazeDataBuffer.shift()
+        }
+      }
+      sendResponse({ success: true });
+      return true;
+
     case 'REQUEST_SCREEN_CAPTURE':
       // Handle screen capture request
       const { sources } = request;
