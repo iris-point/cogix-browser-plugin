@@ -49,11 +49,13 @@ export interface SessionUploadOptions {
 
 /**
  * Browser Plugin Data-IO Client
- * 
+ *
  * Mirrors the functionality of cogixAPIClient.dataIO but adapted for browser extension environment
  */
 export class BrowserDataIOClient {
-  
+  // Token cache for data-io tokens (per project)
+  private _tokenCache = new Map<string, { token: any; expiresAt: number }>();
+
   /**
    * Test CORS preflight request
    */
@@ -82,23 +84,31 @@ export class BrowserDataIOClient {
   }
 
   /**
-   * Get JWT token for data-io access (same as cogixAPIClient.dataIO._getToken)
+   * Get JWT token for data-io access with caching
    * Enhanced with retry logic for network failures
    */
   private async _getToken(projectId: string, sessionId?: string): Promise<any> {
+    // Create cache key from projectId (sessionId is optional)
+    const cacheKey = `${projectId}_${sessionId || 'default'}`;
+
+    // Check if we have a valid cached token
+    const cached = this._tokenCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      console.log('✅ Using cached data-io token for project:', projectId);
+      return cached.token;
+    }
+
+    // Generate new token with retry
     return retryWithBackoff(async () => {
       const authData = await chrome.storage.sync.get(['clerkToken']);
       const token = authData.clerkToken;
-      
+
       if (!token) {
         throw new Error('Not authenticated. Please sign in to the extension.');
       }
 
       const tokenUrl = `${API_BASE_URL}/api/v1/data-io/generate`;
-      console.log('🔑 Fetching JWT token from:', tokenUrl);
-      console.log('🔑 Using API_BASE_URL:', API_BASE_URL);
-      console.log('🔑 Clerk token length:', token?.length || 0);
-      console.log('🔑 Request body:', { project_id: projectId, session_id: sessionId });
+      console.log('🔑 Generating NEW data-io token for project:', projectId);
 
       // Test CORS preflight first
       const corsOk = await this.testCORSPreflight(tokenUrl);
@@ -113,13 +123,6 @@ export class BrowserDataIOClient {
         permissions: ['read', 'write']
       };
 
-      console.log('🔑 Making fetch request to:', tokenUrl);
-      console.log('🔑 Request headers:', {
-        'Authorization': `Bearer ${token?.substring(0, 20)}...`,
-        'Content-Type': 'application/json'
-      });
-      console.log('🔑 Request body:', requestBody);
-
       const response = await fetch(tokenUrl, {
         method: 'POST',
         headers: {
@@ -130,10 +133,7 @@ export class BrowserDataIOClient {
         body: JSON.stringify(requestBody)
       }).catch(fetchError => {
         console.error('🚨 Fetch request failed:', fetchError);
-        console.error('🚨 Error type:', fetchError.constructor.name);
-        console.error('🚨 Error message:', fetchError.message);
         console.error('🚨 Extension ID:', chrome.runtime.id);
-        console.error('🚨 Extension Origin:', `chrome-extension://${chrome.runtime.id}`);
         throw fetchError;
       });
 
@@ -143,23 +143,28 @@ export class BrowserDataIOClient {
           status: response.status,
           statusText: response.statusText,
           url: tokenUrl,
-          errorText: errorText,
-          extensionId: chrome.runtime.id,
-          extensionOrigin: `chrome-extension://${chrome.runtime.id}`
+          errorText: errorText
         });
-        
+
         const error = new Error(`Failed to get data-io token: ${response.status} ${errorText || response.statusText}`);
-        
+
         // Don't retry auth errors (401, 403)
         if (response.status === 401 || response.status === 403) {
           (error as any).noRetry = true;
         }
-        
+
         throw error;
       }
 
       const tokenData = await response.json();
-      console.log('✅ JWT token received successfully');
+      console.log('✅ JWT token received successfully, caching for 7.5 hours');
+
+      // Cache the token - expires in 7.5 hours (30 min before actual expiry)
+      this._tokenCache.set(cacheKey, {
+        token: tokenData,
+        expiresAt: Date.now() + 7.5 * 60 * 60 * 1000
+      });
+
       return tokenData;
     }, {
       ...DEFAULT_RETRY_OPTIONS,
@@ -169,6 +174,14 @@ export class BrowserDataIOClient {
         return DEFAULT_RETRY_OPTIONS.retryCondition!(error);
       }
     });
+  }
+
+  /**
+   * Clear token cache (call on logout or when authentication changes)
+   */
+  clearTokenCache(): void {
+    this._tokenCache.clear();
+    console.log('🗑️ Data-IO token cache cleared');
   }
 
   /**

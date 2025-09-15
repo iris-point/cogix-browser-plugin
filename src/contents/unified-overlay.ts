@@ -535,6 +535,7 @@ async function startRecording(projectId: string) {
 
     recordedChunks = []
     gazeDataBuffer = []
+    gazeSmoothing.reset() // Reset smoothing filter for new recording
     recordingStartTime = Date.now()
     recordingSessionId = generateSessionId()
     
@@ -710,6 +711,7 @@ async function finalizeRecording(projectId: string) {
       // Clean up local data
       recordedChunks = []
       gazeDataBuffer = []
+    gazeSmoothing.reset() // Reset smoothing filter for new recording
       recordingStartTime = null
       recordingSessionId = null
       return
@@ -931,32 +933,148 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 })
 
+// Smoothing filter for gaze data
+const gazeSmoothing = {
+  // Buffer for moving average filter (stores last N points)
+  buffer: [] as Array<{x: number, y: number}>,
+  bufferSize: 5, // Number of points to average (adjustable)
+
+  // Grid-based stabilization (similar to eyeTraceWebV2.2)
+  gridDivisions: 5, // 5x5 grid
+  gridStabilization: true, // Enable/disable grid snapping
+  gridThreshold: 0.02, // Threshold for grid snapping (2% of screen)
+
+  // Kalman filter state (for advanced smoothing)
+  kalmanX: { estimate: 0, errorEstimate: 1 },
+  kalmanY: { estimate: 0, errorEstimate: 1 },
+  kalmanQ: 0.001, // Process noise
+  kalmanR: 0.01,  // Measurement noise
+
+  // Add point and get smoothed result
+  addPoint(x: number, y: number): {x: number, y: number} {
+    // Add to buffer
+    this.buffer.push({x, y})
+    if (this.buffer.length > this.bufferSize) {
+      this.buffer.shift()
+    }
+
+    // Apply moving average
+    let avgX = this.buffer.reduce((sum, p) => sum + p.x, 0) / this.buffer.length
+    let avgY = this.buffer.reduce((sum, p) => sum + p.y, 0) / this.buffer.length
+
+    // Apply Kalman filter for extra smoothness
+    avgX = this.applyKalman(avgX, this.kalmanX)
+    avgY = this.applyKalman(avgY, this.kalmanY)
+
+    // Apply grid stabilization if enabled (like eyeTraceWebV2.2)
+    if (this.gridStabilization) {
+      const gridResult = this.applyGridStabilization(avgX, avgY)
+      avgX = gridResult.x
+      avgY = gridResult.y
+    }
+
+    return {x: avgX, y: avgY}
+  },
+
+  // Simple Kalman filter implementation
+  applyKalman(measurement: number, state: {estimate: number, errorEstimate: number}): number {
+    // Prediction
+    const predictedEstimate = state.estimate
+    const predictedErrorEstimate = state.errorEstimate + this.kalmanQ
+
+    // Update
+    const kalmanGain = predictedErrorEstimate / (predictedErrorEstimate + this.kalmanR)
+    state.estimate = predictedEstimate + kalmanGain * (measurement - predictedEstimate)
+    state.errorEstimate = (1 - kalmanGain) * predictedErrorEstimate
+
+    return state.estimate
+  },
+
+  // Grid-based stabilization (similar to eyeTraceWebV2.2's find_mean_eye_point)
+  applyGridStabilization(x: number, y: number): {x: number, y: number} {
+    // Calculate grid cell
+    const gridX = Math.floor(x * this.gridDivisions)
+    const gridY = Math.floor(y * this.gridDivisions)
+
+    // Calculate grid center
+    const gridCenterX = (gridX + 0.5) / this.gridDivisions
+    const gridCenterY = (gridY + 0.5) / this.gridDivisions
+
+    // Calculate distance to grid center
+    const distX = Math.abs(x - gridCenterX)
+    const distY = Math.abs(y - gridCenterY)
+
+    // Snap to grid if close enough
+    if (distX < this.gridThreshold) {
+      x = gridCenterX
+    }
+    if (distY < this.gridThreshold) {
+      y = gridCenterY
+    }
+
+    return {x, y}
+  },
+
+  // Reset the filter
+  reset() {
+    this.buffer = []
+    this.kalmanX = { estimate: 0, errorEstimate: 1 }
+    this.kalmanY = { estimate: 0, errorEstimate: 1 }
+  }
+}
+
 function handleGazeData(data: any) {
-  // Store gaze data if recording
+  // Apply smoothing filter
+  const smoothedPoint = gazeSmoothing.addPoint(data.x, data.y)
+
+  // Store raw data for recording (with smoothed values as well)
   if (isRecording && recordingStartTime) {
     const gazePoint = {
       timestamp: Date.now() - recordingStartTime,
-      x: data.x,
-      y: data.y,
+      x: data.x,  // Raw x
+      y: data.y,  // Raw y
+      smoothedX: smoothedPoint.x,  // Smoothed x
+      smoothedY: smoothedPoint.y,  // Smoothed y
       leftEye: data.leftEye,
       rightEye: data.rightEye
     }
     gazeDataBuffer.push(gazePoint)
-    
+
     // Update gaze count display
     const gazeCount = document.getElementById('cogix-gaze-count')
     if (gazeCount) {
       gazeCount.textContent = gazeDataBuffer.length.toString()
     }
   }
-  
-  // Update gaze visualization
+
+  // Update gaze visualization with both smoothed and raw data
   if (showGazePoint) {
-    updateGazeVisualization(data.x, data.y)
+    updateGazeVisualization(smoothedPoint.x, smoothedPoint.y, data.x, data.y)
   }
 }
 
-function updateGazeVisualization(x: number, y: number) {
+// Additional element for showing raw average position
+let rawGazeElement: HTMLDivElement | null = null
+let gazeLegendElement: HTMLDivElement | null = null
+
+// Clean up gaze visualization elements
+function cleanupGazeVisualization() {
+  if (gazeOverlayElement) {
+    gazeOverlayElement.remove()
+    gazeOverlayElement = null
+  }
+  if (rawGazeElement) {
+    rawGazeElement.remove()
+    rawGazeElement = null
+  }
+  if (gazeLegendElement) {
+    gazeLegendElement.remove()
+    gazeLegendElement = null
+  }
+}
+
+function updateGazeVisualization(x: number, y: number, rawX?: number, rawY?: number) {
+  // Create smoothed gaze point element (main red dot)
   if (!gazeOverlayElement) {
     gazeOverlayElement = document.createElement('div')
     gazeOverlayElement.id = 'cogix-gaze-point'
@@ -970,9 +1088,51 @@ function updateGazeVisualization(x: number, y: number) {
       pointer-events: none;
       z-index: 2147483646;
       transform: translate(-50%, -50%);
-      transition: all 0.1s ease-out;
     `
     document.body.appendChild(gazeOverlayElement)
+  }
+
+  // Create raw average position element (semi-transparent blue dot - like eyeImagePOS in eyeTraceWebV2.2)
+  if (!rawGazeElement && rawX !== undefined && rawY !== undefined) {
+    rawGazeElement = document.createElement('div')
+    rawGazeElement.id = 'cogix-gaze-raw'
+    rawGazeElement.style.cssText = `
+      position: fixed;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: rgba(0, 100, 255, 0.3);
+      border: 1px solid rgba(0, 100, 255, 0.5);
+      pointer-events: none;
+      z-index: 2147483645;
+      transform: translate(-50%, -50%);
+    `
+    document.body.appendChild(rawGazeElement)
+  }
+
+  // Create legend for gaze visualization (optional, shows what each dot means)
+  if (!gazeLegendElement && gazeSmoothing.gridStabilization) {
+    gazeLegendElement = document.createElement('div')
+    gazeLegendElement.id = 'cogix-gaze-legend'
+    gazeLegendElement.style.cssText = `
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      background: rgba(0, 0, 0, 0.7);
+      color: white;
+      padding: 10px;
+      border-radius: 5px;
+      font-family: monospace;
+      font-size: 11px;
+      pointer-events: none;
+      z-index: 2147483644;
+      line-height: 1.4;
+    `
+    gazeLegendElement.innerHTML = `
+      <div style="margin-bottom: 5px;"><span style="display:inline-block;width:10px;height:10px;background:rgba(255,0,0,0.8);border-radius:50%;margin-right:5px;"></span>Smoothed (Grid: ${gazeSmoothing.gridDivisions}x${gazeSmoothing.gridDivisions})</div>
+      <div><span style="display:inline-block;width:10px;height:10px;background:rgba(0,100,255,0.3);border-radius:50%;margin-right:5px;"></span>Raw Average (L+R Eyes)</div>
+    `
+    document.body.appendChild(gazeLegendElement)
   }
   
   // Convert normalized coordinates (0-1) to screen pixels
@@ -996,9 +1156,29 @@ function updateGazeVisualization(x: number, y: number) {
   const viewportX = (screenX / screenWidth) * window.innerWidth
   const viewportY = (screenY / screenHeight) * window.innerHeight
   
+  // Position smoothed gaze point (red dot)
   gazeOverlayElement.style.left = `${viewportX}px`
   gazeOverlayElement.style.top = `${viewportY}px`
   gazeOverlayElement.style.display = showGazePoint ? 'block' : 'none'
+
+  // Position raw average point (blue dot) if provided
+  if (rawGazeElement && rawX !== undefined && rawY !== undefined) {
+    // Calculate raw position
+    let rawScreenX = rawX * screenWidth
+    let rawScreenY = rawY * screenHeight
+
+    if (rawX >= 0 && rawX <= 1 && rawY >= 0 && rawY <= 1) {
+      rawScreenX = rawX * screenWidth
+      rawScreenY = rawY * screenHeight
+    }
+
+    const rawViewportX = (rawScreenX / screenWidth) * window.innerWidth
+    const rawViewportY = (rawScreenY / screenHeight) * window.innerHeight
+
+    rawGazeElement.style.left = `${rawViewportX}px`
+    rawGazeElement.style.top = `${rawViewportY}px`
+    rawGazeElement.style.display = showGazePoint ? 'block' : 'none'
+  }
 }
 
 function handleCalibrationComplete(result: any) {

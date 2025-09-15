@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { useUser } from '@clerk/chrome-extension'
+import { dataIOClient } from '../../lib/dataIOClient'
 
 export function useAuthSync() {
   const { user, isSignedIn } = useUser()
@@ -45,9 +46,13 @@ export function useAuthSync() {
         }
       } else {
         // Clear auth from storage when signed out
-        await chrome.storage.sync.remove(['clerkUser', 'isAuthenticated'])
-        await chrome.storage.local.remove(['clerkUser', 'isAuthenticated'])
-        console.log('Auth cleared from storage')
+        await chrome.storage.sync.remove(['clerkUser', 'isAuthenticated', 'clerkToken'])
+        await chrome.storage.local.remove(['clerkUser', 'isAuthenticated', 'clerkToken'])
+
+        // Clear data-io token cache
+        dataIOClient.clearTokenCache()
+
+        console.log('Auth and token cache cleared from storage')
       }
     }
 

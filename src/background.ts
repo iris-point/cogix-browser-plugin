@@ -632,6 +632,17 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
         hadValue: !!oldValue,
         hasValue: !!newValue
       });
+
+      // Clear data-io token cache when auth changes or is removed
+      if (key === 'clerkToken' && (!newValue || newValue !== oldValue)) {
+        // Import dynamically to avoid circular dependencies
+        import('./lib/dataIOClient').then(({ dataIOClient }) => {
+          dataIOClient.clearTokenCache();
+          debugLog('BACKGROUND', 'Cleared data-io token cache due to auth change');
+        }).catch(error => {
+          debugLog('BACKGROUND', 'Failed to clear token cache:', error);
+        });
+      }
     }
   }
 });
