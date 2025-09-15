@@ -312,6 +312,20 @@ async function startRecording(projectId: string) {
     gazeDataBuffer = []
     recordingStartTime = Date.now()
     recordingSessionId = generateSessionId()
+    
+    // Ensure eye tracking is active for synchronized recording
+    const state = await eyeTrackerState.getStateAsync()
+    if (state.isCalibrated && !state.isTracking) {
+      console.log('🎯 Starting eye tracking for synchronized recording')
+      await chrome.runtime.sendMessage({ type: 'START_EYE_TRACKING' })
+      
+      // Also ensure gaze visualization is on
+      if (!showGazePoint) {
+        showGazePoint = true
+        chrome.storage.local.set({ showGazePoint: true })
+        console.log('👁️ Enabled gaze visualization for recording')
+      }
+    }
 
     mediaRecorder.ondataavailable = (event) => {
       if (event.data.size > 0) {
@@ -325,9 +339,12 @@ async function startRecording(projectId: string) {
       await finalizeRecording(projectId)
     }
 
-    // Start recording
+    // Start recording - synchronized with eye tracking
     mediaRecorder.start(1000) // Collect data every second
     isRecording = true
+    
+    console.log(`🎬 Recording started at ${new Date(recordingStartTime).toLocaleTimeString()}`)
+    console.log(`📍 Eye tracking active: ${state.isTracking}, Gaze collection started`)
     
     // Update UI
     const recordButton = document.getElementById('cogix-record-btn') as HTMLButtonElement
@@ -343,10 +360,11 @@ async function startRecording(projectId: string) {
     await chrome.runtime.sendMessage({
       type: 'RECORDING_STARTED',
       projectId,
-      sessionId: recordingSessionId
+      sessionId: recordingSessionId,
+      timestamp: recordingStartTime
     })
     
-    console.log('✅ Recording started successfully')
+    console.log('✅ Recording and eye tracking synchronized successfully')
     
   } catch (error) {
     console.error('❌ Failed to start recording:', error)
@@ -489,7 +507,7 @@ async function finalizeRecording(projectId: string) {
       updateUploadProgress(100, 'completed', 'Upload successful!')
       
       // Mark as successfully uploaded to prevent duplicates
-      await markUploadAsCompleted(currentUploadId, uploadSessionId)
+      await markUploadAsCompleted(currentUploadId, sessionId)
       
       // Remove from pending uploads storage
       await removeUploadFromStorage(currentUploadId)
@@ -610,8 +628,20 @@ function updateGazeVisualization(x: number, y: number) {
     document.body.appendChild(gazeOverlayElement)
   }
   
-  gazeOverlayElement.style.left = `${x}px`
-  gazeOverlayElement.style.top = `${y}px`
+  // Convert normalized coordinates (0-1) to screen pixels
+  // The eye tracker likely sends normalized coordinates
+  let screenX = x * window.innerWidth;
+  let screenY = y * window.innerHeight;
+  
+  // Check if coordinates are normalized (between 0 and 1)
+  if (x >= 0 && x <= 1 && y >= 0 && y <= 1) {
+    screenX = x * window.innerWidth
+    screenY = y * window.innerHeight
+    console.log(`📍 Gaze: normalized(${x.toFixed(3)}, ${y.toFixed(3)}) → screen(${Math.round(screenX)}, ${Math.round(screenY)})`)
+  }
+  
+  gazeOverlayElement.style.left = `${screenX}px`
+  gazeOverlayElement.style.top = `${screenY}px`
   gazeOverlayElement.style.display = showGazePoint ? 'block' : 'none'
 }
 
@@ -1020,6 +1050,7 @@ function updateUploadProgress(percent: number, status: 'uploading' | 'completed'
   const progressBar = document.getElementById('cogix-upload-progress-bar')
   const progressText = document.getElementById('cogix-upload-progress-text')
   const statusText = document.getElementById('cogix-upload-status')
+  const actionsDiv = document.getElementById('cogix-upload-actions')
   
   if (progressBar) {
     progressBar.style.width = `${percent}%`
@@ -1034,8 +1065,22 @@ function updateUploadProgress(percent: number, status: 'uploading' | 'completed'
     
     if (status === 'completed') {
       statusText.style.color = '#2ecc71'
+      statusText.innerHTML = '✅ ' + message
+      
+      // Hide actions (retry/cancel buttons) on success
+      if (actionsDiv) {
+        actionsDiv.style.display = 'none'
+      }
+      
+      // Show a success message
+      const uploadTitle = uploadProgressUI.querySelector('h3')
+      if (uploadTitle) {
+        uploadTitle.textContent = '✅ Upload Complete!'
+      }
+      
     } else if (status === 'failed') {
       statusText.style.color = '#e74c3c'
+      statusText.innerHTML = '❌ ' + message
     }
   }
   
