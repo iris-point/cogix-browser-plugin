@@ -440,9 +440,6 @@ async function finalizeRecording(projectId: string) {
       videoDuration = getFallbackDuration(recordingStartTime || Date.now() - duration, Date.now())
     }
 
-    // Convert to array for serialization
-    const videoArray = Array.from(new Uint8Array(await videoBlob.arrayBuffer()))
-
     // Prepare metadata with accurate video duration
     const metadata = {
       duration: videoDuration, // Use extracted duration instead of calculated
@@ -476,13 +473,13 @@ async function finalizeRecording(projectId: string) {
     // Generate upload ID
     currentUploadId = `upload_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
     
-    // Save to local storage as backup
-    const uploadData = {
+    // Save only metadata to local storage (not the video to avoid quota issues)
+    const uploadMetadata = {
       uploadId: currentUploadId,
       projectId,
       sessionId,
-      videoArray,
-      gazeData: gazeDataBuffer,
+      videoBlobSize: videoBlob.size,
+      gazeDataCount: gazeDataBuffer.length,
       metadata,
       screenDimensions: {
         width: screen.width,
@@ -492,49 +489,151 @@ async function finalizeRecording(projectId: string) {
       status: 'pending'
     }
     
-    // Save to local storage for backup
-    await saveUploadToStorage(uploadData)
+    // Save metadata only for tracking
+    await saveUploadMetadata(uploadMetadata)
     
     // Show upload progress UI
-    showUploadProgress(uploadData)
+    showUploadProgress(uploadMetadata)
     
     // Show duration extraction progress
     updateUploadProgress(45, 'uploading', `Extracting video duration (${videoDuration.toFixed(1)}s)...`)
     
-    console.log('📡 Starting upload to data-io...')
+    console.log('📡 Starting DIRECT upload to data-io...')
     
-    // Send to background script for upload
-    const result = await chrome.runtime.sendMessage({
-      type: 'DATA_IO_UPLOAD_SESSION',
-      uploadId: currentUploadId,
-      projectId,
-      sessionId,
-      videoBlob: videoArray,
-      gazeData: gazeDataBuffer,
-      metadata,
-      screenDimensions: {
-        width: screen.width,
-        height: screen.height
+    // Skip Chrome message passing - upload directly to avoid size limits!
+    const videoSizeMB = (videoBlob.size / 1024 / 1024).toFixed(1)
+    console.log(`📤 Uploading ${videoSizeMB}MB video directly to server...`)
+    
+    // Get auth token from storage
+    const authResult = await chrome.storage.sync.get(['clerkToken'])
+    const authToken = authResult.clerkToken
+    
+    if (!authToken) {
+      throw new Error('Not authenticated - please sign in')
+    }
+    
+    // Create form data for multipart upload
+    const formData = new FormData()
+    
+    // Add video file
+    const videoFile = new File([videoBlob], `recording-${sessionId}.webm`, { 
+      type: 'video/webm' 
+    })
+    formData.append('file', videoFile)
+    
+    // Add metadata
+    formData.append('participant_id', 'browser-extension')
+    formData.append('session_type', 'eye_tracking')
+    formData.append('file_type', 'video')
+    
+    // Add all metadata fields
+    Object.entries(metadata).forEach(([key, value]) => {
+      if (value !== undefined && value !== null) {
+        formData.append(key, String(value))
       }
     })
-
-    if (result.success) {
-      console.log('✅ Upload successful:', result)
+    
+    // Add screen dimensions
+    formData.append('screen_width', String(screen.width))
+    formData.append('screen_height', String(screen.height))
+    
+    // Direct upload to data-io worker
+    const DATA_IO_URL = 'https://data-io.cogix.app' // or 'https://cogix-data-io.workers.dev'
+    
+    updateUploadProgress(50, 'uploading', 'Uploading video to server...')
+    
+    try {
+      // Upload video file
+      const videoResponse = await fetch(`${DATA_IO_URL}/upload/${projectId}/${sessionId}`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${authToken}`
+        },
+        body: formData
+      })
+      
+      if (!videoResponse.ok) {
+        const errorText = await videoResponse.text()
+        throw new Error(`Upload failed: ${videoResponse.status} - ${errorText}`)
+      }
+      
+      const videoResult = await videoResponse.json()
+      console.log('✅ Video uploaded successfully:', videoResult)
+      
+      updateUploadProgress(70, 'uploading', 'Uploading gaze data...')
+      
+      // Upload gaze data if available
+      if (gazeDataBuffer && gazeDataBuffer.length > 0) {
+        const gazeFormData = new FormData()
+        const gazeFile = new File([JSON.stringify(gazeDataBuffer)], `gaze-data-${sessionId}.json`, { 
+          type: 'application/json' 
+        })
+        gazeFormData.append('file', gazeFile)
+        gazeFormData.append('participant_id', 'browser-extension')
+        gazeFormData.append('file_type', 'gaze_data')
+        
+        const gazeResponse = await fetch(`${DATA_IO_URL}/upload/${projectId}/${sessionId}`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${authToken}`
+          },
+          body: gazeFormData
+        })
+        
+        if (!gazeResponse.ok) {
+          console.warn('Failed to upload gaze data:', await gazeResponse.text())
+        } else {
+          console.log('✅ Gaze data uploaded successfully')
+        }
+      }
+      
+      updateUploadProgress(85, 'uploading', 'Finalizing session...')
+      
+      // Submit session metadata
+      const sessionData = {
+        session_id: sessionId,
+        participant_id: 'browser-extension',
+        video_file_key: videoResult.key || `${projectId}/${sessionId}/recording-${sessionId}.webm`,
+        gaze_data_file_key: gazeDataBuffer?.length > 0 ? `${projectId}/${sessionId}/gaze-data-${sessionId}.json` : null,
+        metadata: {
+          ...metadata,
+          screen_width: screen.width,
+          screen_height: screen.height,
+          gaze_points_count: gazeDataBuffer?.length || 0,
+          has_video: true,
+          has_gaze_file: gazeDataBuffer?.length > 0
+        }
+      }
+      
+      const submitResponse = await fetch(`${DATA_IO_URL}/submit/${projectId}`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${authToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(sessionData)
+      })
+      
+      if (!submitResponse.ok) {
+        console.warn('Failed to submit session metadata:', await submitResponse.text())
+      }
+      
+      console.log('✅ Direct upload successful!')
       updateUploadProgress(100, 'completed', 'Upload successful!')
       
-      // Mark as successfully uploaded to prevent duplicates
+      // Mark as uploaded
       await markUploadAsCompleted(currentUploadId, sessionId)
-      
-      // Remove from pending uploads storage
       await removeUploadFromStorage(currentUploadId)
       
-      // Hide progress UI after 3 seconds
-      setTimeout(() => {
-        hideUploadProgress()
-      }, 3000)
-    } else {
-      throw new Error(result.error || 'Upload failed')
+    } catch (uploadError) {
+      console.error('❌ Direct upload failed:', uploadError)
+      throw uploadError
     }
+    
+    // Hide progress UI after 3 seconds
+    setTimeout(() => {
+      hideUploadProgress()
+    }, 3000)
     
   } catch (error) {
     console.error('❌ Failed to upload recording:', error)
@@ -998,7 +1097,7 @@ function showUploadProgress(uploadData: any) {
     font-family: -apple-system, BlinkMacSystemFont, sans-serif;
   `
   
-  const videoSizeMB = (uploadData.metadata.videoSize / (1024 * 1024)).toFixed(2)
+  const videoSizeMB = (uploadData.videoBlobSize / (1024 * 1024)).toFixed(2)
   
   uploadProgressUI.innerHTML = `
     <div style="color: white;">
@@ -1009,9 +1108,9 @@ function showUploadProgress(uploadData: any) {
       <div style="margin-bottom: 16px; font-size: 14px; color: #ccc;">
         <div>Session: ${uploadData.sessionId}</div>
         <div>Size: ${videoSizeMB} MB</div>
-        <div>Duration: ${uploadData.metadata.duration ? uploadData.metadata.duration.toFixed(1) + 's' : 'Extracting...'}</div>
-        <div>Gaze Points: ${uploadData.metadata.gazePointsCount}</div>
-        <div>Codec: ${uploadData.metadata.codec}</div>
+        <div>Duration: ${uploadData.metadata?.duration ? uploadData.metadata.duration.toFixed(1) + 's' : 'Extracting...'}</div>
+        <div>Gaze Points: ${uploadData.gazeDataCount || 0}</div>
+        <div>Codec: ${uploadData.metadata?.codec || 'video/webm'}</div>
       </div>
       
       <div style="margin-bottom: 16px;">
@@ -1163,16 +1262,16 @@ function disableUIButtons(disable: boolean) {
 // Local Storage Management for Upload Backup
 // ============================================================================
 
-async function saveUploadToStorage(uploadData: any) {
+async function saveUploadMetadata(uploadMetadata: any) {
   try {
     const uploads = await getStoredUploads()
-    uploads[uploadData.uploadId] = uploadData
+    uploads[uploadMetadata.uploadId] = uploadMetadata
     
-    // Store in chrome.storage.local (has more space than localStorage)
+    // Store in chrome.storage.local (metadata only, no video data)
     await chrome.storage.local.set({ pendingUploads: uploads })
-    console.log('💾 Upload data saved to storage:', uploadData.uploadId)
+    console.log('💾 Upload metadata saved to storage:', uploadMetadata.uploadId)
   } catch (error) {
-    console.error('Failed to save upload to storage:', error)
+    console.error('Failed to save upload metadata to storage:', error)
   }
 }
 
@@ -1234,39 +1333,13 @@ async function retryFailedUpload(uploadId: string) {
       return
     }
     
-    console.log('🔄 Retrying upload:', uploadId)
+    // We can no longer retry uploads since we don't store the video data
+    console.error('❌ Cannot retry upload - video data not stored to avoid quota issues')
+    showNotification('Cannot retry upload. Please record again if needed.', 'error')
+    updateUploadProgress(0, 'failed', 'Retry not available - please record again')
     
-    // Reset progress UI
-    updateUploadProgress(0, 'uploading', 'Retrying upload...')
-    
-    // Retry the upload
-    const result = await chrome.runtime.sendMessage({
-      type: 'DATA_IO_UPLOAD_SESSION',
-      uploadId: uploadData.uploadId,
-      projectId: uploadData.projectId,
-      sessionId: uploadData.sessionId,
-      videoBlob: uploadData.videoArray,
-      gazeData: uploadData.gazeData,
-      metadata: uploadData.metadata,
-      screenDimensions: uploadData.screenDimensions
-    })
-    
-    if (result.success) {
-      console.log('✅ Retry successful:', result)
-      updateUploadProgress(100, 'completed', 'Upload successful!')
-      
-      // Mark as successfully uploaded
-      await markUploadAsCompleted(uploadId, uploadData.sessionId)
-      
-      // Remove from pending uploads
-      await removeUploadFromStorage(uploadId)
-      
-      setTimeout(() => {
-        hideUploadProgress()
-      }, 3000)
-    } else {
-      throw new Error(result.error || 'Retry failed')
-    }
+    // Remove the failed metadata
+    await removeUploadFromStorage(uploadId)
   } catch (error) {
     console.error('❌ Retry failed:', error)
     updateUploadProgress(0, 'failed', `Retry failed: ${error.message}`)
@@ -1380,9 +1453,15 @@ async function getVideoDuration(videoBlob: Blob): Promise<number> {
           if (isFinite(duration) && duration > 0) {
             console.log(`📹 Video duration extracted: ${duration.toFixed(2)}s`)
             resolve(duration)
+          } else if (!isFinite(duration) || duration === Infinity) {
+            console.warn('⚠️ Invalid video duration (Infinity or NaN):', duration)
+            reject(new Error(`Invalid video duration: ${duration}`))
+          } else if (duration <= 0) {
+            console.warn('⚠️ Invalid video duration (zero or negative):', duration)
+            reject(new Error(`Invalid video duration: ${duration}`))
           } else {
             console.warn('⚠️ Invalid video duration:', duration)
-            reject(new Error('Invalid video duration'))
+            reject(new Error(`Invalid video duration: ${duration}`))
           }
         }
       })
@@ -1412,12 +1491,31 @@ async function getVideoDuration(videoBlob: Blob): Promise<number> {
       video.preload = 'metadata'
       video.muted = true
       video.style.display = 'none'
+      video.playsInline = true
+      
+      // For WebM files from MediaRecorder, sometimes need to seek to get duration
+      video.addEventListener('durationchange', () => {
+        if (!resolved && isFinite(video.duration) && video.duration > 0) {
+          console.log('📹 Duration available after durationchange:', video.duration)
+        }
+      })
       
       // Add to DOM temporarily (required for some browsers)
       document.body.appendChild(video)
       
       // Start loading
       video.src = objectURL
+      
+      // WebM workaround: seek to end to force duration calculation
+      video.addEventListener('loadeddata', () => {
+        if (!resolved && (!isFinite(video.duration) || video.duration === Infinity)) {
+          console.log('🔧 Attempting WebM duration workaround...')
+          video.currentTime = 1e101 // Seek to "infinity"
+          video.addEventListener('seeked', () => {
+            video.currentTime = 0 // Reset
+          }, { once: true })
+        }
+      }, { once: true })
       
     } catch (error) {
       console.error('❌ Failed to create video element for duration extraction:', error)
