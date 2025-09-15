@@ -385,8 +385,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
     case 'DATA_IO_UPLOAD_SESSION':
       // Upload complete eye tracking session from background script
-      const { projectId: uploadProjectId, sessionId: uploadSessionId, videoBlob, gazeData, metadata, screenDimensions } = request;
+      const { uploadId, projectId: uploadProjectId, sessionId: uploadSessionId, videoBlob, gazeData, metadata, screenDimensions } = request;
       debugLog('BACKGROUND', 'Uploading eye tracking session', { 
+        uploadId,
         sessionId: uploadSessionId, 
         projectId: uploadProjectId,
         videoSize: videoBlob?.length || 0,
@@ -395,6 +396,26 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       
       (async () => {
         try {
+          // Send progress update to content script
+          const sendProgressUpdate = (percent: number, message: string) => {
+            chrome.tabs.query({}, (tabs) => {
+              tabs.forEach(tab => {
+                if (tab.id) {
+                  chrome.tabs.sendMessage(tab.id, {
+                    type: 'UPLOAD_PROGRESS',
+                    uploadId,
+                    percent,
+                    message
+                  }).catch(() => {
+                    // Ignore errors
+                  });
+                }
+              });
+            });
+          };
+          
+          sendProgressUpdate(30, 'Preparing data for upload...');
+          
           // Convert serialized blob data back to File objects
           const videoFile = videoBlob ? new File([new Uint8Array(videoBlob)], `recording-${uploadSessionId}.webm`, { 
             type: 'video/webm' 
@@ -425,15 +446,33 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               },
               onProgress: (stage: string, progress: number, details?: any) => {
                 // Send progress updates back to content script
+                let message = 'Uploading...';
+                let percent = progress;
+                
+                if (stage === 'preparing') {
+                  message = 'Preparing upload...';
+                  percent = Math.min(30, progress * 0.3);
+                } else if (stage === 'uploading') {
+                  message = 'Uploading data to server...';
+                  percent = 30 + (progress * 0.6); // 30-90%
+                } else if (stage === 'processing') {
+                  message = 'Processing on server...';
+                  percent = 90 + (progress * 0.1); // 90-100%
+                }
+                
+                sendProgressUpdate(percent, message);
+                
+                // Also send detailed progress for debugging
                 if (sender.tab?.id) {
                   chrome.tabs.sendMessage(sender.tab.id, {
-                    type: 'UPLOAD_PROGRESS',
+                    type: 'UPLOAD_PROGRESS_DETAIL',
+                    uploadId,
                     sessionId: uploadSessionId,
                     stage,
                     progress,
                     details
-                  }).catch(error => {
-                    console.warn('[BACKGROUND] Failed to send progress update:', error);
+                  }).catch(() => {
+                    // Ignore errors
                   });
                 }
               }

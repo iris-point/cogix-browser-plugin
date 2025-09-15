@@ -28,6 +28,9 @@ let showGazePoint = true
 let gazeOverlayElement: HTMLElement | null = null
 let isCalibrating = false
 let calibrationUI: HTMLElement | null = null
+let uploadProgressUI: HTMLElement | null = null
+let currentUploadId: string | null = null
+let isUploading = false
 
 // ============================================================================
 // Main Overlay Creation
@@ -425,11 +428,51 @@ async function finalizeRecording(projectId: string) {
       codec: getSupportedMimeType()
     }
 
-    console.log('📡 Uploading to data-io...')
+    // Check if this session was already uploaded (in case of duplicate attempts)
+    const isAlreadyUploaded = await checkIfSessionUploaded(sessionId)
+    if (isAlreadyUploaded) {
+      console.log('⚠️ Session already uploaded, skipping duplicate:', sessionId)
+      showNotification('This recording was already uploaded successfully', 'info')
+      
+      // Clean up local data
+      recordedChunks = []
+      gazeDataBuffer = []
+      recordingStartTime = null
+      recordingSessionId = null
+      return
+    }
+    
+    // Generate upload ID
+    currentUploadId = `upload_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+    
+    // Save to local storage as backup
+    const uploadData = {
+      uploadId: currentUploadId,
+      projectId,
+      sessionId,
+      videoArray,
+      gazeData: gazeDataBuffer,
+      metadata,
+      screenDimensions: {
+        width: screen.width,
+        height: screen.height
+      },
+      timestamp: Date.now(),
+      status: 'pending'
+    }
+    
+    // Save to local storage for backup
+    await saveUploadToStorage(uploadData)
+    
+    // Show upload progress UI
+    showUploadProgress(uploadData)
+    
+    console.log('📡 Starting upload to data-io...')
     
     // Send to background script for upload
     const result = await chrome.runtime.sendMessage({
       type: 'DATA_IO_UPLOAD_SESSION',
+      uploadId: currentUploadId,
       projectId,
       sessionId,
       videoBlob: videoArray,
@@ -443,14 +486,31 @@ async function finalizeRecording(projectId: string) {
 
     if (result.success) {
       console.log('✅ Upload successful:', result)
-      showNotification('Recording uploaded successfully!', 'success')
+      updateUploadProgress(100, 'completed', 'Upload successful!')
+      
+      // Mark as successfully uploaded to prevent duplicates
+      await markUploadAsCompleted(currentUploadId, uploadSessionId)
+      
+      // Remove from pending uploads storage
+      await removeUploadFromStorage(currentUploadId)
+      
+      // Hide progress UI after 3 seconds
+      setTimeout(() => {
+        hideUploadProgress()
+      }, 3000)
     } else {
       throw new Error(result.error || 'Upload failed')
     }
     
   } catch (error) {
     console.error('❌ Failed to upload recording:', error)
-    showNotification('Failed to upload recording: ' + error.message, 'error')
+    updateUploadProgress(0, 'failed', `Upload failed: ${error.message}`)
+    
+    // Mark as failed in storage but keep for retry
+    await markUploadAsFailed(currentUploadId, error.message)
+    
+    // Show retry button
+    showRetryButton()
   }
   
   // Clean up
@@ -490,6 +550,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       
     case 'CALIBRATION_CANCELLED':
       hideCalibration()
+      break
+      
+    case 'UPLOAD_PROGRESS':
+      // Handle upload progress updates from background script
+      if (message.uploadId === currentUploadId) {
+        updateUploadProgress(message.percent, 'uploading', message.message)
+      }
+      break
+      
+    case 'UPLOAD_PROGRESS_DETAIL':
+      // Log detailed progress for debugging
+      console.log('📊 Upload progress:', message)
       break
   }
 })
@@ -849,6 +921,373 @@ function hideCalibration() {
 }
 
 // ============================================================================
+// Upload Progress UI
+// ============================================================================
+
+function showUploadProgress(uploadData: any) {
+  isUploading = true
+  
+  // Disable all UI buttons
+  disableUIButtons(true)
+  
+  // Create upload progress overlay
+  if (uploadProgressUI) {
+    uploadProgressUI.remove()
+  }
+  
+  uploadProgressUI = document.createElement('div')
+  uploadProgressUI.id = 'cogix-upload-progress'
+  uploadProgressUI.style.cssText = `
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 400px;
+    background: rgba(26, 26, 26, 0.98);
+    border: 2px solid #176feb;
+    border-radius: 12px;
+    padding: 24px;
+    z-index: 2147483648;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+  `
+  
+  const videoSizeMB = (uploadData.metadata.videoSize / (1024 * 1024)).toFixed(2)
+  
+  uploadProgressUI.innerHTML = `
+    <div style="color: white;">
+      <h3 style="margin: 0 0 16px 0; font-size: 20px; font-weight: 600;">
+        📤 Uploading Recording
+      </h3>
+      
+      <div style="margin-bottom: 16px; font-size: 14px; color: #ccc;">
+        <div>Session: ${uploadData.sessionId}</div>
+        <div>Size: ${videoSizeMB} MB</div>
+        <div>Gaze Points: ${uploadData.metadata.gazePointsCount}</div>
+      </div>
+      
+      <div style="margin-bottom: 16px;">
+        <div style="background: rgba(255, 255, 255, 0.1); border-radius: 8px; overflow: hidden; height: 8px;">
+          <div id="cogix-upload-progress-bar" style="
+            background: linear-gradient(90deg, #176feb 0%, #44c1f7 100%);
+            height: 100%;
+            width: 0%;
+            transition: width 0.3s ease;
+          "></div>
+        </div>
+        <div id="cogix-upload-progress-text" style="margin-top: 8px; font-size: 14px; text-align: center; color: #ccc;">
+          Preparing upload...
+        </div>
+      </div>
+      
+      <div id="cogix-upload-status" style="font-size: 14px; color: #888; text-align: center;">
+        Please wait, do not close this tab
+      </div>
+      
+      <div id="cogix-upload-actions" style="display: none; margin-top: 16px; text-align: center;">
+        <button id="cogix-retry-upload" style="
+          background: #176feb;
+          color: white;
+          border: none;
+          padding: 8px 16px;
+          border-radius: 6px;
+          cursor: pointer;
+          margin-right: 8px;
+        ">🔄 Retry Upload</button>
+        
+        <button id="cogix-cancel-upload" style="
+          background: #e74c3c;
+          color: white;
+          border: none;
+          padding: 8px 16px;
+          border-radius: 6px;
+          cursor: pointer;
+        ">❌ Cancel</button>
+      </div>
+    </div>
+  `
+  
+  document.body.appendChild(uploadProgressUI)
+  
+  // Simulate initial progress
+  setTimeout(() => updateUploadProgress(10, 'uploading', 'Connecting to server...'), 100)
+  setTimeout(() => updateUploadProgress(25, 'uploading', 'Uploading video data...'), 500)
+}
+
+function updateUploadProgress(percent: number, status: 'uploading' | 'completed' | 'failed', message: string) {
+  if (!uploadProgressUI) return
+  
+  const progressBar = document.getElementById('cogix-upload-progress-bar')
+  const progressText = document.getElementById('cogix-upload-progress-text')
+  const statusText = document.getElementById('cogix-upload-status')
+  
+  if (progressBar) {
+    progressBar.style.width = `${percent}%`
+  }
+  
+  if (progressText) {
+    progressText.textContent = `${percent}%`
+  }
+  
+  if (statusText) {
+    statusText.textContent = message
+    
+    if (status === 'completed') {
+      statusText.style.color = '#2ecc71'
+    } else if (status === 'failed') {
+      statusText.style.color = '#e74c3c'
+    }
+  }
+  
+  if (status === 'completed') {
+    isUploading = false
+    disableUIButtons(false)
+  }
+}
+
+function hideUploadProgress() {
+  if (uploadProgressUI) {
+    uploadProgressUI.remove()
+    uploadProgressUI = null
+  }
+  isUploading = false
+  currentUploadId = null
+  disableUIButtons(false)
+}
+
+function showRetryButton() {
+  const actions = document.getElementById('cogix-upload-actions')
+  if (actions) {
+    actions.style.display = 'block'
+    
+    const retryBtn = document.getElementById('cogix-retry-upload')
+    const cancelBtn = document.getElementById('cogix-cancel-upload')
+    
+    if (retryBtn) {
+      retryBtn.onclick = async () => {
+        await retryFailedUpload(currentUploadId!)
+      }
+    }
+    
+    if (cancelBtn) {
+      cancelBtn.onclick = () => {
+        hideUploadProgress()
+      }
+    }
+  }
+}
+
+function disableUIButtons(disable: boolean) {
+  // Disable/enable all interactive buttons in the overlay
+  const buttons = [
+    'cogix-calibrate-btn',
+    'cogix-record-btn',
+    'cogix-gaze-toggle',
+    'cogix-minimize-btn'
+  ]
+  
+  buttons.forEach(id => {
+    const btn = document.getElementById(id) as HTMLButtonElement
+    if (btn) {
+      btn.disabled = disable
+      btn.style.opacity = disable ? '0.5' : '1'
+      btn.style.cursor = disable ? 'not-allowed' : 'pointer'
+    }
+  })
+}
+
+// ============================================================================
+// Local Storage Management for Upload Backup
+// ============================================================================
+
+async function saveUploadToStorage(uploadData: any) {
+  try {
+    const uploads = await getStoredUploads()
+    uploads[uploadData.uploadId] = uploadData
+    
+    // Store in chrome.storage.local (has more space than localStorage)
+    await chrome.storage.local.set({ pendingUploads: uploads })
+    console.log('💾 Upload data saved to storage:', uploadData.uploadId)
+  } catch (error) {
+    console.error('Failed to save upload to storage:', error)
+  }
+}
+
+async function getStoredUploads(): Promise<any> {
+  try {
+    const result = await chrome.storage.local.get(['pendingUploads'])
+    return result.pendingUploads || {}
+  } catch (error) {
+    console.error('Failed to get stored uploads:', error)
+    return {}
+  }
+}
+
+async function removeUploadFromStorage(uploadId: string) {
+  try {
+    const uploads = await getStoredUploads()
+    delete uploads[uploadId]
+    await chrome.storage.local.set({ pendingUploads: uploads })
+    console.log('🗑️ Upload removed from storage:', uploadId)
+  } catch (error) {
+    console.error('Failed to remove upload from storage:', error)
+  }
+}
+
+async function markUploadAsFailed(uploadId: string, errorMessage: string) {
+  try {
+    const uploads = await getStoredUploads()
+    if (uploads[uploadId]) {
+      uploads[uploadId].status = 'failed'
+      uploads[uploadId].error = errorMessage
+      uploads[uploadId].failedAt = Date.now()
+      await chrome.storage.local.set({ pendingUploads: uploads })
+      console.log('❌ Upload marked as failed:', uploadId)
+    }
+  } catch (error) {
+    console.error('Failed to mark upload as failed:', error)
+  }
+}
+
+async function retryFailedUpload(uploadId: string) {
+  try {
+    const uploads = await getStoredUploads()
+    const uploadData = uploads[uploadId]
+    
+    if (!uploadData) {
+      showNotification('Upload data not found', 'error')
+      return
+    }
+    
+    // Check if this session was already successfully uploaded
+    const isAlreadyUploaded = await checkIfSessionUploaded(uploadData.sessionId)
+    if (isAlreadyUploaded) {
+      console.log('⚠️ Session already uploaded, skipping duplicate:', uploadData.sessionId)
+      updateUploadProgress(100, 'completed', 'Session already uploaded')
+      await removeUploadFromStorage(uploadId)
+      setTimeout(() => {
+        hideUploadProgress()
+      }, 3000)
+      return
+    }
+    
+    console.log('🔄 Retrying upload:', uploadId)
+    
+    // Reset progress UI
+    updateUploadProgress(0, 'uploading', 'Retrying upload...')
+    
+    // Retry the upload
+    const result = await chrome.runtime.sendMessage({
+      type: 'DATA_IO_UPLOAD_SESSION',
+      uploadId: uploadData.uploadId,
+      projectId: uploadData.projectId,
+      sessionId: uploadData.sessionId,
+      videoBlob: uploadData.videoArray,
+      gazeData: uploadData.gazeData,
+      metadata: uploadData.metadata,
+      screenDimensions: uploadData.screenDimensions
+    })
+    
+    if (result.success) {
+      console.log('✅ Retry successful:', result)
+      updateUploadProgress(100, 'completed', 'Upload successful!')
+      
+      // Mark as successfully uploaded
+      await markUploadAsCompleted(uploadId, uploadData.sessionId)
+      
+      // Remove from pending uploads
+      await removeUploadFromStorage(uploadId)
+      
+      setTimeout(() => {
+        hideUploadProgress()
+      }, 3000)
+    } else {
+      throw new Error(result.error || 'Retry failed')
+    }
+  } catch (error) {
+    console.error('❌ Retry failed:', error)
+    updateUploadProgress(0, 'failed', `Retry failed: ${error.message}`)
+    await markUploadAsFailed(uploadId, error.message)
+    showRetryButton()
+  }
+}
+
+// Track successfully uploaded sessions to prevent duplicates
+async function markUploadAsCompleted(uploadId: string, sessionId: string) {
+  try {
+    // Get completed uploads history
+    const result = await chrome.storage.local.get(['completedUploads'])
+    const completedUploads = result.completedUploads || {}
+    
+    // Store with session ID as key and completion time
+    completedUploads[sessionId] = {
+      uploadId,
+      completedAt: Date.now(),
+      sessionId
+    }
+    
+    // Keep only last 100 completed uploads to avoid storage bloat
+    const sortedKeys = Object.keys(completedUploads)
+      .sort((a, b) => completedUploads[b].completedAt - completedUploads[a].completedAt)
+    
+    if (sortedKeys.length > 100) {
+      sortedKeys.slice(100).forEach(key => delete completedUploads[key])
+    }
+    
+    await chrome.storage.local.set({ completedUploads })
+    console.log('✅ Marked session as uploaded:', sessionId)
+  } catch (error) {
+    console.error('Failed to mark upload as completed:', error)
+  }
+}
+
+// Check if a session has already been uploaded
+async function checkIfSessionUploaded(sessionId: string): Promise<boolean> {
+  try {
+    const result = await chrome.storage.local.get(['completedUploads'])
+    const completedUploads = result.completedUploads || {}
+    
+    if (completedUploads[sessionId]) {
+      const uploadTime = new Date(completedUploads[sessionId].completedAt)
+      console.log(`⚠️ Session ${sessionId} was already uploaded at ${uploadTime.toLocaleString()}`)
+      return true
+    }
+    
+    return false
+  } catch (error) {
+    console.error('Failed to check upload status:', error)
+    return false // Assume not uploaded if we can't check
+  }
+}
+
+// Check for failed uploads on startup
+async function checkFailedUploads() {
+  const uploads = await getStoredUploads()
+  const failedUploads = Object.values(uploads).filter((u: any) => u.status === 'failed')
+  
+  if (failedUploads.length > 0) {
+    console.log(`📦 Found ${failedUploads.length} failed uploads`)
+    
+    // Check each failed upload to see if it was actually completed
+    for (const upload of failedUploads) {
+      const isCompleted = await checkIfSessionUploaded((upload as any).sessionId)
+      if (isCompleted) {
+        console.log(`🗑️ Removing duplicate failed upload for completed session: ${(upload as any).sessionId}`)
+        await removeUploadFromStorage((upload as any).uploadId)
+      }
+    }
+    
+    // Re-check after cleanup
+    const remainingUploads = await getStoredUploads()
+    const remainingFailed = Object.values(remainingUploads).filter((u: any) => u.status === 'failed')
+    
+    if (remainingFailed.length > 0) {
+      showNotification(`${remainingFailed.length} failed upload(s) found. Open extension to retry.`, 'info')
+    }
+  }
+}
+
+// ============================================================================
 // Helper Functions
 // ============================================================================
 
@@ -870,7 +1309,22 @@ function getSupportedMimeType(): string {
 }
 
 function generateSessionId(): string {
-  return `rec_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+  // Create a human-readable timestamp
+  const now = new Date()
+  const year = now.getFullYear()
+  const month = String(now.getMonth() + 1).padStart(2, '0')
+  const day = String(now.getDate()).padStart(2, '0')
+  const hour = String(now.getHours()).padStart(2, '0')
+  const minute = String(now.getMinutes()).padStart(2, '0')
+  const second = String(now.getSeconds()).padStart(2, '0')
+  const millisecond = String(now.getMilliseconds()).padStart(3, '0')
+  
+  // Format: rec_YYYYMMDD_HHMMSS_MS_RANDOM
+  // Example: rec_20240115_143025_123_abc123
+  const timestamp = `${year}${month}${day}_${hour}${minute}${second}_${millisecond}`
+  const randomId = Math.random().toString(36).substr(2, 6)
+  
+  return `rec_${timestamp}_${randomId}`
 }
 
 function showNotification(message: string, type: 'success' | 'error' | 'info' = 'info') {
@@ -945,9 +1399,13 @@ document.head.appendChild(style)
 
 // Initialize overlay when DOM is ready
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', createOverlay)
+  document.addEventListener('DOMContentLoaded', () => {
+    createOverlay()
+    checkFailedUploads() // Check for any failed uploads
+  })
 } else {
   createOverlay()
+  checkFailedUploads() // Check for any failed uploads
 }
 
 // Load saved preferences
