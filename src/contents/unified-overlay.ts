@@ -430,12 +430,24 @@ async function finalizeRecording(projectId: string) {
     const videoBlob = new Blob(recordedChunks, { type: getSupportedMimeType() })
     console.log('🎥 Video blob created, size:', videoBlob.size)
 
+    // Extract video duration from the actual video file
+    let videoDuration: number
+    try {
+      videoDuration = await getVideoDuration(videoBlob)
+      console.log('⏱️ Video duration extracted:', videoDuration, 'seconds')
+    } catch (error) {
+      console.warn('⚠️ Failed to extract video duration, using calculated fallback:', error.message)
+      videoDuration = getFallbackDuration(recordingStartTime || Date.now() - duration, Date.now())
+    }
+
     // Convert to array for serialization
     const videoArray = Array.from(new Uint8Array(await videoBlob.arrayBuffer()))
 
-    // Prepare metadata
+    // Prepare metadata with accurate video duration
     const metadata = {
-      duration: duration / 1000,
+      duration: videoDuration, // Use extracted duration instead of calculated
+      calculatedDuration: duration / 1000, // Keep calculated for comparison
+      actualDuration: videoDuration, // Explicit field for actual video duration
       url: window.location.href,
       title: document.title,
       userAgent: navigator.userAgent,
@@ -443,7 +455,8 @@ async function finalizeRecording(projectId: string) {
       screen_height: screen.height,
       gazePointsCount: gazeDataBuffer.length,
       videoSize: videoBlob.size,
-      codec: getSupportedMimeType()
+      codec: getSupportedMimeType(),
+      hasValidDuration: videoDuration > 0
     }
 
     // Check if this session was already uploaded (in case of duplicate attempts)
@@ -484,6 +497,9 @@ async function finalizeRecording(projectId: string) {
     
     // Show upload progress UI
     showUploadProgress(uploadData)
+    
+    // Show duration extraction progress
+    updateUploadProgress(45, 'uploading', `Extracting video duration (${videoDuration.toFixed(1)}s)...`)
     
     console.log('📡 Starting upload to data-io...')
     
@@ -993,7 +1009,9 @@ function showUploadProgress(uploadData: any) {
       <div style="margin-bottom: 16px; font-size: 14px; color: #ccc;">
         <div>Session: ${uploadData.sessionId}</div>
         <div>Size: ${videoSizeMB} MB</div>
+        <div>Duration: ${uploadData.metadata.duration ? uploadData.metadata.duration.toFixed(1) + 's' : 'Extracting...'}</div>
         <div>Gaze Points: ${uploadData.metadata.gazePointsCount}</div>
+        <div>Codec: ${uploadData.metadata.codec}</div>
       </div>
       
       <div style="margin-bottom: 16px;">
@@ -1330,6 +1348,91 @@ async function checkFailedUploads() {
       showNotification(`${remainingFailed.length} failed upload(s) found. Open extension to retry.`, 'info')
     }
   }
+}
+
+// ============================================================================
+// Video Duration Extraction
+// ============================================================================
+
+/**
+ * Extract video duration from a video blob using a temporary video element
+ * This is more reliable than calculating from timestamps because MediaRecorder
+ * sometimes produces files with incorrect or missing duration metadata
+ */
+async function getVideoDuration(videoBlob: Blob): Promise<number> {
+  return new Promise((resolve, reject) => {
+    try {
+      const video = document.createElement('video')
+      const objectURL = URL.createObjectURL(videoBlob)
+      
+      let resolved = false
+      
+      // Set up event listeners
+      video.addEventListener('loadedmetadata', () => {
+        if (!resolved) {
+          resolved = true
+          const duration = video.duration
+          
+          // Clean up
+          URL.revokeObjectURL(objectURL)
+          video.remove()
+          
+          if (isFinite(duration) && duration > 0) {
+            console.log(`📹 Video duration extracted: ${duration.toFixed(2)}s`)
+            resolve(duration)
+          } else {
+            console.warn('⚠️ Invalid video duration:', duration)
+            reject(new Error('Invalid video duration'))
+          }
+        }
+      })
+      
+      video.addEventListener('error', (e) => {
+        if (!resolved) {
+          resolved = true
+          console.error('❌ Error loading video for duration extraction:', e)
+          URL.revokeObjectURL(objectURL)
+          video.remove()
+          reject(new Error('Failed to load video for duration extraction'))
+        }
+      })
+      
+      // Timeout after 10 seconds
+      setTimeout(() => {
+        if (!resolved) {
+          resolved = true
+          console.warn('⏰ Timeout extracting video duration')
+          URL.revokeObjectURL(objectURL)
+          video.remove()
+          reject(new Error('Timeout extracting video duration'))
+        }
+      }, 10000)
+      
+      // Set video properties
+      video.preload = 'metadata'
+      video.muted = true
+      video.style.display = 'none'
+      
+      // Add to DOM temporarily (required for some browsers)
+      document.body.appendChild(video)
+      
+      // Start loading
+      video.src = objectURL
+      
+    } catch (error) {
+      console.error('❌ Failed to create video element for duration extraction:', error)
+      reject(error)
+    }
+  })
+}
+
+/**
+ * Fallback function to get duration from calculated time if video extraction fails
+ */
+function getFallbackDuration(startTime: number, endTime: number): number {
+  const calculatedDuration = (endTime - startTime) / 1000
+  console.log(`📊 Using fallback calculated duration: ${calculatedDuration.toFixed(2)}s`)
+  return calculatedDuration
 }
 
 // ============================================================================

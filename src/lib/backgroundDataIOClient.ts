@@ -117,7 +117,8 @@ export class BackgroundDataIOClient {
     projectId: string, 
     sessionId: string, 
     file: File,
-    participantId?: string
+    participantId?: string,
+    metadata?: { videoDuration?: number; [key: string]: any }
   ): Promise<any> {
     const tokenData = await this._getToken(projectId, sessionId);
     
@@ -127,6 +128,12 @@ export class BackgroundDataIOClient {
     formData.append('session_id', sessionId);
     if (participantId) {
       formData.append('participant_id', participantId);
+    }
+    
+    // Add video duration metadata if provided
+    if (metadata?.videoDuration && file.type.startsWith('video/')) {
+      formData.append('video_duration', metadata.videoDuration.toString());
+      console.log('📹 [BACKGROUND] Adding video duration to upload:', metadata.videoDuration, 'seconds');
     }
     
     console.log('📁 [BACKGROUND] Uploading file to data-io:', {
@@ -231,7 +238,10 @@ export class BackgroundDataIOClient {
         projectId, 
         sessionId, 
         options.videoFile,
-        options.participantId
+        options.participantId,
+        {
+          videoDuration: options.metadata?.duration || options.metadata?.actualDuration
+        }
       );
       videoFileKey = videoResult.file_key;
       
@@ -272,11 +282,20 @@ export class BackgroundDataIOClient {
         gaze_data_file_uploaded: !!gazeDataFileKey,
         gaze_data: gazeData,
         metadata: {
-          duration: options.metadata?.duration || 60,
+          // Duration information (multiple fields for compatibility)
+          duration: options.metadata?.duration || options.metadata?.actualDuration || 60,
+          session_duration: options.metadata?.duration || options.metadata?.actualDuration || 60,
+          video_duration: options.metadata?.duration || options.metadata?.actualDuration,
+          calculated_duration: options.metadata?.calculatedDuration,
+          has_valid_duration: options.metadata?.hasValidDuration || false,
+          
+          // Screen and device info
           screen_width: options.metadata?.screen_width || 1920, // Default fallback for background script
           screen_height: options.metadata?.screen_height || 1080, // Default fallback for background script
           device: options.metadata?.device || 'browser-extension',
           source: 'browser-extension',
+          
+          // Data counts and availability
           gaze_points_count: gazeData.length,
           has_video: !!videoFileKey,
           has_gaze_file: !!gazeDataFileKey,
