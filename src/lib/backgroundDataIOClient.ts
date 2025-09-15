@@ -130,19 +130,25 @@ export class BackgroundDataIOClient {
       formData.append('participant_id', participantId);
     }
     
-    // Add video duration metadata if provided
-    if (file.type.startsWith('video/')) {
-      // Use 'duration' if provided, fallback to 'videoDuration'
-      const duration = metadata?.duration || metadata?.videoDuration;
-      if (duration) {
-        formData.append('video_duration', duration.toString());
-        console.log('📹 [BACKGROUND] Adding video duration to upload:', duration, 'seconds');
+    // Add duration metadata for all file types (video and gaze data JSON)
+    const duration = metadata?.duration || metadata?.videoDuration || metadata?.actualDuration;
+    if (duration) {
+      formData.append('duration', duration.toString());
+      if (file.type.startsWith('video/')) {
+        formData.append('video_duration', duration.toString()); // Legacy field name
       }
+      console.log('📹 [BACKGROUND] Adding duration to upload:', duration, 'seconds');
     }
     
-    // Add any other metadata fields that might be useful
-    if (metadata?.duration) {
-      formData.append('duration', metadata.duration.toString());
+    // Add any additional metadata fields
+    if (metadata) {
+      // Add common metadata fields that might be useful for data-io
+      const fieldsToAdd = ['screen_width', 'screen_height', 'gaze_points_count', 'codec'];
+      for (const field of fieldsToAdd) {
+        if (metadata[field] !== undefined) {
+          formData.append(field, metadata[field].toString());
+        }
+      }
     }
     
     console.log('📁 [BACKGROUND] Uploading file to data-io:', {
@@ -349,7 +355,17 @@ export class BackgroundDataIOClient {
         type: 'eye_tracking_session' as const,
         storage_method: 'edge_worker' as const,
         submitted_at: new Date().toISOString(),
-        extension_version: chrome.runtime.getManifest().version
+        extension_version: chrome.runtime.getManifest().version,
+        // Include essential session metadata for list API
+        duration: options.metadata?.duration || options.metadata?.actualDuration || 60,
+        video_duration: options.metadata?.duration || options.metadata?.actualDuration,
+        screen_width: options.metadata?.screen_width || 1920,
+        screen_height: options.metadata?.screen_height || 1080,
+        gaze_points_count: gazeData.length,
+        has_video: !!videoFileKey,
+        has_gaze_file: !!gazeDataFileKey,
+        url: options.metadata?.url,
+        title: options.metadata?.title
       }
     };
 
