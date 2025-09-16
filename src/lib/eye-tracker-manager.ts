@@ -22,6 +22,9 @@ export class EyeTrackerManager {
   private isTracking: boolean = false
   private latestCameraFrame: { imageData: string; timestamp: number } | null = null
 
+  // Direct real-time gaze data transmission (no batching needed)
+  private visualizationEnabled = true  // Always send for visualization
+
   private constructor() {
     this.initializeTracker()
     this.restoreStateFromStorage()
@@ -110,7 +113,7 @@ export class EyeTrackerManager {
       })
 
       this.tracker.on('gazeData', (data: GazeData) => {
-        // Broadcast gaze data to all tabs
+        // Send immediately for real-time visualization
         this.broadcastGazeData(data)
       })
 
@@ -217,19 +220,55 @@ export class EyeTrackerManager {
       this.tracker.disconnect()
       console.log('Persistent eye tracker disconnected')
     }
-    
+
     // Ensure state is reset
     this.isConnected = false
     this.isCalibrated = false
     this.isTracking = false
     this.deviceStatus = DeviceStatus.DISCONNECTED
     this.latestCameraFrame = null
-    
+
     // Update centralized state - this will handle all state resets
     await eyeTrackerState.setConnected(false)
-    
+
     // Broadcast the disconnected status
     this.broadcastStatus()
+  }
+
+  async forceCleanup(): Promise<void> {
+    console.log('[EyeTrackerManager] Force cleanup initiated')
+
+    // Force disconnect tracker if exists
+    if (this.tracker) {
+      try {
+        this.tracker.disconnect()
+      } catch (error) {
+        console.error('[EyeTrackerManager] Force disconnect error (ignored):', error)
+      }
+      // Reset tracker instance
+      this.tracker = null
+      // Reinitialize for next connection
+      this.initializeTracker()
+    }
+
+    // Reset all state
+    this.isConnected = false
+    this.isCalibrated = false
+    this.isTracking = false
+    this.deviceStatus = DeviceStatus.DISCONNECTED
+    this.latestCameraFrame = null
+
+    // Clear centralized state
+    try {
+      await eyeTrackerState.setDisconnected()
+    } catch (error) {
+      console.error('[EyeTrackerManager] State cleanup error (ignored):', error)
+    }
+
+    // Broadcast disconnected status
+    this.broadcastStatus()
+
+    console.log('[EyeTrackerManager] Force cleanup completed')
   }
 
   startCalibration(): void {
@@ -329,21 +368,23 @@ export class EyeTrackerManager {
     })
   }
 
+  // Direct real-time broadcast - simplified for immediate visualization
   private broadcastGazeData(data: GazeData): void {
-    // Send to all tabs
+    // Send to all tabs for real-time visualization
     chrome.tabs.query({}, (tabs) => {
       tabs.forEach(tab => {
         if (tab.id) {
           chrome.tabs.sendMessage(tab.id, {
             type: 'GAZE_DATA',
-            data: data
+            data: data,
+            timestamp: Date.now()
           }).catch(() => {
-            // Ignore errors
+            // Tab might not have content script, ignore
           })
         }
       })
     })
-    
+
     // Send to popup if open
     chrome.runtime.sendMessage({
       type: 'GAZE_DATA',
