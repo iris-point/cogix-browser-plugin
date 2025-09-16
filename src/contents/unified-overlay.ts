@@ -11,6 +11,7 @@
 
 import { validateProjectSelection } from '../lib/projectValidation'
 import { eyeTrackerState } from '../lib/eyeTrackerState'
+import { eventTracker, UserEvent, TimelineEvent } from '../lib/eventTracker'
 
 // ============================================================================
 // State Management
@@ -22,6 +23,7 @@ let mediaRecorder: MediaRecorder | null = null
 let currentStream: MediaStream | null = null
 let recordedChunks: Blob[] = []
 let gazeDataBuffer: any[] = []
+let eventDataBuffer: TimelineEvent[] = []
 let recordingStartTime: number | null = null
 let recordingSessionId: string | null = null
 let recordingProjectId: string | null = null // Store project ID globally
@@ -700,9 +702,13 @@ async function startRecording(projectId: string) {
 
     recordedChunks = []
     gazeDataBuffer = []
+    eventDataBuffer = []
     gazeSmoothing.reset() // Reset smoothing filter for new recording
     recordingStartTime = Date.now()
     recordingSessionId = generateSessionId()
+
+    // Start event tracking
+    eventTracker.startTracking(recordingStartTime)
     
     // Ensure eye tracking is active for synchronized recording
     const state = await eyeTrackerState.getStateAsync()
@@ -778,6 +784,12 @@ async function stopRecording() {
 
   console.log('⏹️ Stopping recording...')
   
+  // Stop event tracking
+  eventTracker.stopTracking()
+  const timelineEvents = eventTracker.getTimelineEvents()
+  eventDataBuffer.push(...timelineEvents)
+  console.log('📝 Event tracking stopped, captured', timelineEvents.length, 'events')
+
   // Stop media recorder
   mediaRecorder.stop()
   
@@ -833,7 +845,8 @@ async function finalizeRecording(projectId?: string) {
     projectId: effectiveProjectId,
     duration: duration / 1000 + 's',
     chunks: recordedChunks.length,
-    gazePoints: gazeDataBuffer.length
+    gazePoints: gazeDataBuffer.length,
+    events: eventDataBuffer.length
   })
 
   try {
@@ -872,6 +885,7 @@ async function finalizeRecording(projectId?: string) {
       physical_width: screenInfo.physicalWidth,
       physical_height: screenInfo.physicalHeight,
       gazePointsCount: gazeDataBuffer.length,
+      eventCount: eventDataBuffer.length,
       videoSize: videoBlob.size,
       codec: getSupportedMimeType(),
       hasValidDuration: videoDuration > 0
@@ -886,6 +900,7 @@ async function finalizeRecording(projectId?: string) {
       // Clean up local data
       recordedChunks = []
       gazeDataBuffer = []
+      eventDataBuffer = []
     gazeSmoothing.reset() // Reset smoothing filter for new recording
       recordingStartTime = null
       recordingSessionId = null
@@ -902,6 +917,7 @@ async function finalizeRecording(projectId?: string) {
       sessionId,
       videoBlobSize: videoBlob.size,
       gazeDataCount: gazeDataBuffer.length,
+      eventDataCount: eventDataBuffer.length,
       metadata,
       screenDimensions: {
         width: screenInfo.width,
@@ -941,6 +957,7 @@ async function finalizeRecording(projectId?: string) {
         videoBlobUrl: blobUrl,
         videoBlobSize: videoBlob.size,
         gazeData: gazeDataBuffer,
+        eventData: eventDataBuffer,
         metadata,
         screenDimensions: {
           width: screen.width,
@@ -988,6 +1005,7 @@ async function finalizeRecording(projectId?: string) {
   // Clean up
   recordedChunks = []
   gazeDataBuffer = []
+  eventDataBuffer = []
   recordingStartTime = null
   recordingSessionId = null
 }

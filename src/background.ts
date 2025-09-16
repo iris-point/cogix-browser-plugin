@@ -484,7 +484,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
     case 'DATA_IO_UPLOAD_SESSION_INDEXED':
       // Handle large video upload via IndexedDB reference
-      const { uploadId: indexedUploadId, projectId: indexedProjectId, sessionId: indexedSessionId, videoBlobId, videoBlobSize, gazeData: indexedGazeData, metadata: indexedMetadata, screenDimensions: indexedScreenDims } = request;
+      const { uploadId: indexedUploadId, projectId: indexedProjectId, sessionId: indexedSessionId, videoBlobId, videoBlobSize, gazeData: indexedGazeData, eventData: indexedEventData, metadata: indexedMetadata, screenDimensions: indexedScreenDims } = request;
       debugLog('BACKGROUND', 'Large video upload via IndexedDB', { 
         uploadId: indexedUploadId,
         videoBlobId,
@@ -572,13 +572,29 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               screen_width: indexedScreenDims?.width || 1920,
               screen_height: indexedScreenDims?.height || 1080,
               gaze_points_count: indexedGazeData.length,
+              event_count: indexedEventData?.length || 0,
               recorded_at: new Date().toISOString()
             },
-            gaze_data: indexedGazeData
+            gaze_data: indexedGazeData,
+            event_data: indexedEventData || []
           } : null;
-          
-          const gazeFile = gazeDataWithMetadata ? new File([JSON.stringify(gazeDataWithMetadata)], `gaze-data-${indexedSessionId}.json`, { 
-            type: 'application/json' 
+
+          const gazeFile = gazeDataWithMetadata ? new File([JSON.stringify(gazeDataWithMetadata)], `session-data-${indexedSessionId}.json`, {
+            type: 'application/json'
+          }) : undefined;
+
+          // Create separate event data file if events exist
+          const eventFile = indexedEventData?.length > 0 ? new File([JSON.stringify({
+            session_id: indexedSessionId,
+            project_id: indexedProjectId,
+            participant_id: 'browser-extension',
+            event_data: indexedEventData,
+            metadata: {
+              event_count: indexedEventData.length,
+              recorded_at: new Date().toISOString()
+            }
+          })], `event-data-${indexedSessionId}.json`, {
+            type: 'application/json'
           }) : undefined;
           
           // Upload using backgroundDataIOClient
@@ -588,12 +604,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             {
               videoFile,
               gazeDataFile: gazeFile,
+              eventDataFile: eventFile,
               gazeData: indexedGazeData,
+              eventData: indexedEventData,
               participantId: 'browser-extension',
               metadata: {
                 ...indexedMetadata,
                 screen_width: indexedScreenDims?.width || 1920,
-                screen_height: indexedScreenDims?.height || 1080
+                screen_height: indexedScreenDims?.height || 1080,
+                event_count: indexedEventData?.length || 0
               }
             }
           );
@@ -646,7 +665,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       
     case 'DATA_IO_UPLOAD_SESSION_BLOB_URL':
       // Handle upload using blob URL
-      const { uploadId: blobUploadId, projectId: blobProjectId, sessionId: blobSessionId, videoBlobUrl, videoBlobSize: blobVideoSize, gazeData: blobGazeData, metadata: blobMetadata, screenDimensions: blobScreenDims } = request;
+      const { uploadId: blobUploadId, projectId: blobProjectId, sessionId: blobSessionId, videoBlobUrl, videoBlobSize: blobVideoSize, gazeData: blobGazeData, eventData: blobEventData, metadata: blobMetadata, screenDimensions: blobScreenDims } = request;
       debugLog('BACKGROUND', 'Upload via blob URL', { 
         uploadId: blobUploadId,
         blobUrl: videoBlobUrl,
@@ -678,13 +697,29 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               screen_width: blobScreenDims?.width || 1920,
               screen_height: blobScreenDims?.height || 1080,
               gaze_points_count: blobGazeData.length,
+              event_count: blobEventData?.length || 0,
               recorded_at: new Date().toISOString()
             },
-            gaze_data: blobGazeData
+            gaze_data: blobGazeData,
+            event_data: blobEventData || []
           } : null;
-          
-          const gazeFile = gazeDataWithMetadata ? new File([JSON.stringify(gazeDataWithMetadata)], `gaze-data-${blobSessionId}.json`, { 
-            type: 'application/json' 
+
+          const gazeFile = gazeDataWithMetadata ? new File([JSON.stringify(gazeDataWithMetadata)], `session-data-${blobSessionId}.json`, {
+            type: 'application/json'
+          }) : undefined;
+
+          // Create separate event data file if events exist
+          const eventFile = blobEventData?.length > 0 ? new File([JSON.stringify({
+            session_id: blobSessionId,
+            project_id: blobProjectId,
+            participant_id: 'browser-extension',
+            event_data: blobEventData,
+            metadata: {
+              event_count: blobEventData.length,
+              recorded_at: new Date().toISOString()
+            }
+          })], `event-data-${blobSessionId}.json`, {
+            type: 'application/json'
           }) : undefined;
           
           // Upload using backgroundDataIOClient
@@ -694,12 +729,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             {
               videoFile,
               gazeDataFile: gazeFile,
+              eventDataFile: eventFile,
               gazeData: blobGazeData,
+              eventData: blobEventData,
               participantId: 'browser-extension',
               metadata: {
                 ...blobMetadata,
                 screen_width: blobScreenDims?.width || 1920,
-                screen_height: blobScreenDims?.height || 1080
+                screen_height: blobScreenDims?.height || 1080,
+                event_count: blobEventData?.length || 0
               }
             }
           );
